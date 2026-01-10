@@ -1,0 +1,1706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NIFTY Strangle Trading</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            background: #f5f0e8;
+            color: #3d3d3d;
+            min-height: 100vh;
+            font-size: 12px;
+        }
+
+        .header {
+            background: #fff;
+            padding: 8px 20px;
+            border-bottom: 2px solid #e0d8cc;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #5a5a5a;
+            letter-spacing: -0.5px;
+        }
+
+        .header .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.75rem;
+        }
+
+        .refresh-btn {
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 6px 10px;
+            cursor: pointer;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-family: inherit;
+        }
+
+        .refresh-btn:hover {
+            background: #f0f0f0;
+            border-color: #999;
+        }
+
+        .refresh-btn.spinning svg {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #e8a0a0;
+        }
+
+        .status-dot.connected {
+            background: #a0d8a0;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 220px 1fr 280px;
+            gap: 10px;
+            padding: 10px;
+            height: calc(100vh - 42px);
+        }
+
+        .panel {
+            background: #fff;
+            border-radius: 4px;
+            border: 1px solid #e0d8cc;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            background: #faf8f5;
+            padding: 6px 12px;
+            font-weight: 500;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            border-bottom: 1px solid #e0d8cc;
+        }
+
+        .panel-content {
+            padding: 10px;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        /* Login Panel */
+        .login-section {
+            margin-bottom: 12px;
+        }
+
+        .login-section h3 {
+            font-size: 0.65rem;
+            color: #999;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .user-info {
+            background: #f0fdf0;
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+            border: 1px solid #c8e6c8;
+        }
+
+        .user-info .name {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #4a7c4a;
+        }
+
+        .user-info .email {
+            font-size: 0.65rem;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .login-form input {
+            width: 100%;
+            padding: 7px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fafafa;
+            color: #333;
+            margin-bottom: 6px;
+            font-family: inherit;
+            font-size: 0.75rem;
+        }
+
+        .login-form input:focus {
+            outline: none;
+            border-color: #aaa;
+            background: #fff;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 7px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #e8e0d5;
+            color: #555;
+            border-color: #d0c8bc;
+        }
+
+        .btn-primary:hover {
+            background: #ddd5c8;
+        }
+
+        .btn-secondary {
+            background: #f5f5f5;
+            color: #666;
+            margin-top: 8px;
+        }
+
+        .btn-success {
+            background: #d4edda;
+            color: #3d6b3d;
+            border-color: #c3e6cb;
+        }
+
+        .btn-success:hover {
+            background: #c8e6c9;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .settings-group {
+            margin-top: 10px;
+        }
+
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .setting-row label {
+            font-size: 0.7rem;
+            color: #666;
+        }
+
+        .setting-row input[type="number"] {
+            width: 50px;
+            padding: 4px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fafafa;
+            color: #333;
+            text-align: center;
+            font-family: inherit;
+            font-size: 0.75rem;
+        }
+
+        .toggle {
+            position: relative;
+            width: 40px;
+            height: 20px;
+        }
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ddd;
+            transition: 0.3s;
+            border-radius: 20px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: #fff;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle input:checked + .toggle-slider {
+            background-color: #a0d8a0;
+        }
+
+        .toggle input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Monitor Panel */
+        .market-status {
+            text-align: center;
+            padding: 6px;
+            background: #fafafa;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            border: 1px solid #eee;
+            font-size: 0.75rem;
+        }
+
+        .market-status.open {
+            background: #f0fdf0;
+            border-color: #c8e6c8;
+        }
+
+        .market-status.closed {
+            background: #fdf0f0;
+            border-color: #e6c8c8;
+        }
+
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .data-card {
+            background: #fafafa;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
+
+        .data-card.full {
+            grid-column: span 2;
+        }
+
+        .data-card label {
+            font-size: 0.6rem;
+            color: #999;
+            text-transform: uppercase;
+            display: block;
+            margin-bottom: 2px;
+            letter-spacing: 0.5px;
+        }
+
+        .data-card .value {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #444;
+        }
+
+        .data-card .value.positive {
+            color: #4a7c4a;
+        }
+
+        .data-card .value.negative {
+            color: #8b4a4a;
+        }
+
+        .signal-box {
+            background: #fafafa;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #eee;
+        }
+
+        .signal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            font-size: 0.75rem;
+        }
+
+        .signal-status {
+            font-size: 0.65rem;
+            padding: 3px 8px;
+            border-radius: 10px;
+            background: #e8a0a0;
+            color: #fff;
+        }
+
+        .signal-status.active {
+            background: #a0d8a0;
+            color: #3d5a3d;
+        }
+
+        .signal-status.ready {
+            background: #f0e68c;
+            color: #5a5a3d;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .progress-bar {
+            height: 4px;
+            background: #eee;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #d4a5a5, #a0d8a0);
+            transition: width 0.5s;
+        }
+
+        .strangle-details {
+            background: #fafafa;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #eee;
+        }
+
+        .strangle-details h3 {
+            font-size: 0.7rem;
+            color: #888;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .strangle-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 0.75rem;
+        }
+
+        .strangle-row:last-child {
+            border-bottom: none;
+        }
+
+        .strangle-row .label {
+            color: #888;
+        }
+
+        .strangle-row .value {
+            font-weight: 500;
+            color: #444;
+        }
+
+        .trade-btn {
+            width: 100%;
+            padding: 10px;
+            font-size: 0.8rem;
+        }
+
+        /* Positions Panel */
+        .position-card {
+            background: #fafafa;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 6px;
+            border: 1px solid #eee;
+        }
+
+        .position-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .position-symbol {
+            font-weight: 500;
+            font-size: 0.7rem;
+            color: #555;
+        }
+
+        .position-pnl {
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .position-pnl.positive {
+            color: #4a7c4a;
+        }
+
+        .position-pnl.negative {
+            color: #8b4a4a;
+        }
+
+        .position-details {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.6rem;
+            color: #999;
+        }
+
+        .total-pnl {
+            background: #fafafa;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+            margin-top: 8px;
+            border: 1px solid #eee;
+        }
+
+        .total-pnl label {
+            font-size: 0.6rem;
+            color: #999;
+            display: block;
+            margin-bottom: 2px;
+            text-transform: uppercase;
+        }
+
+        .total-pnl .value {
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+
+        .no-positions {
+            text-align: center;
+            padding: 20px;
+            color: #aaa;
+            font-size: 0.75rem;
+        }
+
+        .refresh-time {
+            text-align: center;
+            font-size: 0.6rem;
+            color: #bbb;
+            margin-top: 6px;
+        }
+
+        /* Tabs */
+        .tab-buttons {
+            display: flex;
+            gap: 4px;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: #999;
+            padding: 4px 12px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-family: inherit;
+            border-radius: 3px;
+        }
+
+        .tab-btn.active {
+            background: #e8e0d5;
+            color: #555;
+        }
+
+        .tab-btn:hover:not(.active) {
+            color: #666;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .history-summary {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .summary-card {
+            background: #fafafa;
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+            border: 1px solid #eee;
+        }
+
+        .summary-card.full {
+            grid-column: span 3;
+        }
+
+        .summary-card label {
+            font-size: 0.55rem;
+            color: #999;
+            display: block;
+            margin-bottom: 2px;
+            text-transform: uppercase;
+        }
+
+        .summary-card .value {
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .expiry-card {
+            background: #fafafa;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 6px;
+            border: 1px solid #eee;
+        }
+
+        .expiry-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .expiry-date {
+            font-weight: 500;
+            color: #666;
+            font-size: 0.75rem;
+        }
+
+        .expiry-pnl {
+            font-weight: 600;
+            font-size: 0.8rem;
+        }
+
+        .expiry-details {
+            font-size: 0.65rem;
+            color: #888;
+        }
+
+        .expiry-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+
+        .positive { color: #4a7c4a; }
+        .negative { color: #8b4a4a; }
+
+        /* Strike edit buttons */
+        .strike-edit {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .strike-btn {
+            width: 22px;
+            height: 22px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            background: #fff;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #666;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+
+        .strike-btn:hover {
+            background: #e8e0d5;
+            border-color: #999;
+        }
+
+        .strike-btn:active {
+            background: #d0c8bc;
+        }
+
+        .strike-ltp {
+            color: #888;
+            font-weight: 400;
+            margin-left: 4px;
+        }
+
+        .strike-modified {
+            color: #8b6914 !important;
+            font-weight: 600;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #fff;
+            border-radius: 6px;
+            padding: 24px;
+            max-width: 420px;
+            width: 90%;
+            border: 1px solid #ddd;
+        }
+
+        .modal-header {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #555;
+        }
+
+        .modal-body {
+            margin-bottom: 16px;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 8px;
+        }
+
+        .modal-footer .btn {
+            flex: 1;
+        }
+
+        .alert {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            font-size: 0.85rem;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #3d6b3d;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #6b3d3d;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NIFTY 7-Delta Strangle Trading</h1>
+        <div class="status">
+            <button class="refresh-btn" onclick="manualRefresh()" title="Refresh data">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+            </button>
+            <span id="connectionText">Disconnected</span>
+            <div class="status-dot" id="connectionDot"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Left Panel: Login & Settings -->
+        <div class="panel">
+            <div class="panel-header">Login & Settings</div>
+            <div class="panel-content">
+                <div class="login-section">
+                    <h3>Zerodha Connection</h3>
+
+                    {% if login_success %}
+                    <div class="alert alert-success">
+                        Connected as {{ user_name }}!
+                    </div>
+                    {% endif %}
+
+                    {% if login_error %}
+                    <div class="alert alert-error">
+                        Login failed: {{ login_error }}
+                    </div>
+                    {% endif %}
+
+                    <div id="userInfo" class="user-info" style="display: none;">
+                        <div class="name" id="userName"></div>
+                        <div class="status-text" style="color: #51cf66; font-size: 0.8rem; margin-top: 5px;">Connected</div>
+                    </div>
+                    <div id="loginForm" class="login-form">
+                        <button class="btn btn-primary" onclick="getLoginLink()">Get Link for Request Token</button>
+                        <div id="loginLinkContainer" style="display: none; margin: 15px 0;">
+                            <label style="font-size: 0.75rem; color: #888; display: block; margin-bottom: 5px;">Click link below, login & copy redirect URL:</label>
+                            <a id="loginLink" href="#" target="_blank" style="color: #e94560; font-size: 0.85rem; word-break: break-all;"></a>
+                        </div>
+                        <input type="text" id="requestToken" placeholder="Paste redirect URL here">
+                        <button class="btn btn-success" onclick="submitToken()">Connect</button>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h3 style="font-size: 0.85rem; color: #888; margin-bottom: 15px;">SETTINGS</h3>
+
+                    <div class="setting-row">
+                        <label>Live Trading</label>
+                        <label class="toggle">
+                            <input type="checkbox" id="liveTrading" onchange="updateSettings()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="setting-row">
+                        <label>Lots per Trade</label>
+                        <input type="number" id="lotQuantity" min="1" max="50" value="6" onchange="updateSettings()">
+                    </div>
+
+                    <div class="setting-row">
+                        <label>Lot Size</label>
+                        <span id="lotSize">65</span>
+                    </div>
+
+                    <div class="setting-row">
+                        <label>Total Qty</label>
+                        <span id="totalQty">390</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Panel: Monitor & Trade -->
+        <div class="panel">
+            <div class="panel-header">Market Monitor</div>
+            <div class="panel-content">
+                <div id="marketStatus" class="market-status closed">
+                    <span id="marketStatusText">Market Closed</span>
+                </div>
+
+                <div class="data-grid">
+                    <div class="data-card">
+                        <label>NIFTY Spot</label>
+                        <div class="value" id="spotPrice">--</div>
+                    </div>
+                    <div class="data-card">
+                        <label>ATM Strike</label>
+                        <div class="value" id="atmStrike">--</div>
+                    </div>
+                    <div class="data-card">
+                        <label>Straddle Price</label>
+                        <div class="value" id="straddlePrice">--</div>
+                    </div>
+                    <div class="data-card">
+                        <label>Straddle VWAP</label>
+                        <div class="value" id="straddleVwap">--</div>
+                    </div>
+                    <div class="data-card full">
+                        <label>Straddle vs VWAP</label>
+                        <div class="value" id="vwapDiff">--</div>
+                    </div>
+                </div>
+
+                <div class="signal-box">
+                    <div class="signal-header">
+                        <span>Entry Signal</span>
+                        <span class="signal-status" id="signalStatus">Inactive</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="fill" id="signalProgress" style="width: 0%"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.85rem; color: #888;">
+                        <span id="signalDuration">0m 0s</span>
+                        <span>Required: 5m 0s</span>
+                    </div>
+                    <div style="text-align: center; margin-top: 10px; font-size: 0.85rem;">
+                        <span>Window: <span id="tradingWindow">--</span></span>
+                        <span style="margin-left: 20px;">Trades: M:<span id="morningTrades">0</span> A:<span id="afternoonTrades">0</span></span>
+                    </div>
+                </div>
+
+                <div class="strangle-details">
+                    <h3>7-Delta Strangle</h3>
+                    <div class="strangle-row">
+                        <span class="label">SELL CALL</span>
+                        <span class="value strike-edit">
+                            <button class="strike-btn" onclick="adjustStrike('call', -50)">-</button>
+                            <span id="callStrike">--</span>
+                            <button class="strike-btn" onclick="adjustStrike('call', 50)">+</button>
+                            <span class="strike-ltp">@ <span id="callLtp">--</span></span>
+                        </span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Call Delta</span>
+                        <span class="value" id="callDelta">--</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">SELL PUT</span>
+                        <span class="value strike-edit">
+                            <button class="strike-btn" onclick="adjustStrike('put', -50)">-</button>
+                            <span id="putStrike">--</span>
+                            <button class="strike-btn" onclick="adjustStrike('put', 50)">+</button>
+                            <span class="strike-ltp">@ <span id="putLtp">--</span></span>
+                        </span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Put Delta</span>
+                        <span class="value" id="putDelta">--</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Width</span>
+                        <span class="value"><span id="width">--</span> pts</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Expiry</span>
+                        <span class="value"><span id="expiry">--</span> (<span id="dte">--</span> DTE)</span>
+                    </div>
+                    <div class="strangle-row" style="background: #f0fdf0; margin: 10px -14px -14px; padding: 12px 14px; border-radius: 0 0 4px 4px; border-top: 1px solid #c8e6c8;">
+                        <span class="label">Total Premium (<span id="lotsDisplay">6</span> lots)</span>
+                        <span class="value positive" style="font-size: 1.1rem;">₹<span id="totalPremium">--</span></span>
+                    </div>
+                </div>
+
+                <button class="btn btn-success trade-btn" id="tradeBtn" onclick="showTradeConfirm()" disabled>
+                    Place Trade
+                </button>
+                <div class="refresh-time">Last update: <span id="lastUpdate">--</span></div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Positions & History -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="tab-buttons">
+                    <button class="tab-btn active" onclick="switchTab('positions')">Positions</button>
+                    <button class="tab-btn" onclick="switchTab('history')">History</button>
+                </div>
+            </div>
+            <div class="panel-content">
+                <!-- Positions Tab -->
+                <div id="positionsTab" class="tab-content active" style="display: block;">
+                    <div id="positionsContainer">
+                        <div class="no-positions">No open positions</div>
+                    </div>
+                    <div class="total-pnl">
+                        <label>Open P&L</label>
+                        <div class="value" id="totalPnl">₹0.00</div>
+                    </div>
+                </div>
+
+                <!-- History Tab -->
+                <div id="historyTab" class="tab-content" style="display: none;">
+                    <div class="history-summary">
+                        <div class="summary-card">
+                            <label>Manual</label>
+                            <div class="value" id="manualProfitDisplay">₹0</div>
+                        </div>
+                        <div class="summary-card">
+                            <label>Booked</label>
+                            <div class="value positive" id="bookedProfit">₹0</div>
+                        </div>
+                        <div class="summary-card">
+                            <label>Open</label>
+                            <div class="value" id="openPnl">₹0</div>
+                        </div>
+                        <div class="summary-card full">
+                            <label>Total (Manual + Booked + Open)</label>
+                            <div class="value" id="totalProfit">₹0</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0 6px;">
+                        <h4 style="color: #888; font-size: 0.7rem; margin: 0;">BY EXPIRY</h4>
+                        <button class="btn btn-secondary" style="width: auto; padding: 3px 8px; font-size: 0.65rem; margin: 0;" onclick="syncHistory()">Sync</button>
+                    </div>
+                    <div id="historyContainer">
+                        <div class="no-positions">No trade history</div>
+                    </div>
+                    <div id="historySource" style="text-align: center; font-size: 0.6rem; color: #555; margin-top: 6px;"></div>
+                </div>
+
+                <div class="refresh-time">Auto-refresh every 1 min</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trade Confirmation Modal -->
+    <div class="modal" id="tradeModal">
+        <div class="modal-content">
+            <div class="modal-header">Confirm Trade</div>
+            <div class="modal-body">
+                <div id="tradeAlert"></div>
+                <div class="strangle-details">
+                    <div class="strangle-row">
+                        <span class="label">SELL CALL</span>
+                        <span class="value" id="modalCall">--</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">SELL PUT</span>
+                        <span class="value" id="modalPut">--</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Quantity</span>
+                        <span class="value" id="modalQty">--</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Total Premium</span>
+                        <span class="value positive" id="modalPremium">--</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-success" id="confirmTradeBtn" onclick="executeTrade()">Confirm Trade</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let refreshInterval;
+        let positionInterval;
+        let historyInterval;
+        let lastMarketData = null;
+
+        // Track custom strike adjustments
+        let customStrikes = {
+            call: null,  // null means use default
+            put: null
+        };
+        let originalStrikes = {
+            call: null,
+            put: null
+        };
+
+        // Manual profit per expiry (stored in CSV via API)
+        let manualProfits = {};
+
+        function switchTab(tab) {
+            // Update buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            if (event && event.target) {
+                event.target.classList.add('active');
+            }
+
+            // Update content - hide all, show selected
+            document.getElementById('positionsTab').style.display = 'none';
+            document.getElementById('historyTab').style.display = 'none';
+            document.getElementById(tab + 'Tab').style.display = 'block';
+            document.getElementById(tab + 'Tab').classList.add('active');
+
+            // Refresh history when switching to history tab
+            if (tab === 'history') {
+                refreshHistory();
+            }
+        }
+
+        function adjustStrike(type, delta) {
+            const strikeEl = document.getElementById(type + 'Strike');
+            const currentStrike = parseInt(strikeEl.textContent);
+
+            if (isNaN(currentStrike)) return;
+
+            const newStrike = currentStrike + delta;
+            strikeEl.textContent = newStrike;
+
+            // Store custom strike
+            customStrikes[type] = newStrike;
+
+            // Highlight as modified if different from original
+            if (originalStrikes[type] && newStrike !== originalStrikes[type]) {
+                strikeEl.classList.add('strike-modified');
+            } else {
+                strikeEl.classList.remove('strike-modified');
+                customStrikes[type] = null;  // Reset to default
+            }
+
+            // Update width
+            updateWidth();
+
+            // Fetch new premium and delta
+            fetchOptionQuote(type, newStrike);
+        }
+
+        function fetchOptionQuote(type, strike) {
+            if (!lastMarketData || !lastMarketData.expiry) return;
+
+            const optionType = type === 'call' ? 'CE' : 'PE';
+            const ltpEl = document.getElementById(type + 'Ltp');
+            const deltaEl = document.getElementById(type + 'Delta');
+
+            // Show loading state
+            ltpEl.textContent = '...';
+            deltaEl.textContent = '...';
+
+            fetch(`/api/option/quote?strike=${strike}&type=${optionType}&expiry=${lastMarketData.expiry}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Quote error:', data.error);
+                        ltpEl.textContent = 'N/A';
+                        deltaEl.textContent = 'N/A';
+                        return;
+                    }
+
+                    ltpEl.textContent = '₹' + data.ltp?.toFixed(2);
+                    deltaEl.textContent = data.delta?.toFixed(4);
+
+                    // Highlight if modified
+                    if (customStrikes[type]) {
+                        ltpEl.classList.add('strike-modified');
+                        deltaEl.classList.add('strike-modified');
+                    }
+
+                    // Update total premium estimate
+                    updateTotalPremium();
+                })
+                .catch(err => {
+                    console.error('Quote fetch error:', err);
+                    ltpEl.textContent = 'Err';
+                    deltaEl.textContent = 'Err';
+                });
+        }
+
+        function updateTotalPremium() {
+            // Calculate total premium based on current displayed LTPs
+            const callLtpText = document.getElementById('callLtp').textContent;
+            const putLtpText = document.getElementById('putLtp').textContent;
+
+            const callLtp = parseFloat(callLtpText.replace('₹', '')) || 0;
+            const putLtp = parseFloat(putLtpText.replace('₹', '')) || 0;
+
+            if (callLtp && putLtp && lastMarketData) {
+                const lotSize = 65;  // NIFTY lot size
+                const lots = lastMarketData.lots || 6;
+                const totalPremium = (callLtp + putLtp) * lotSize * lots;
+                document.getElementById('totalPremium').textContent = totalPremium.toLocaleString('en-IN', {maximumFractionDigits: 2});
+            }
+        }
+
+        function updateWidth() {
+            const callStrike = parseInt(document.getElementById('callStrike').textContent) || 0;
+            const putStrike = parseInt(document.getElementById('putStrike').textContent) || 0;
+            if (callStrike && putStrike) {
+                document.getElementById('width').textContent = callStrike - putStrike;
+            }
+        }
+
+        function resetStrikes() {
+            // Reset to original strikes from market data
+            if (originalStrikes.call) {
+                document.getElementById('callStrike').textContent = originalStrikes.call;
+                document.getElementById('callStrike').classList.remove('strike-modified');
+                document.getElementById('callLtp').classList.remove('strike-modified');
+                document.getElementById('callDelta').classList.remove('strike-modified');
+            }
+            if (originalStrikes.put) {
+                document.getElementById('putStrike').textContent = originalStrikes.put;
+                document.getElementById('putStrike').classList.remove('strike-modified');
+                document.getElementById('putLtp').classList.remove('strike-modified');
+                document.getElementById('putDelta').classList.remove('strike-modified');
+            }
+            customStrikes.call = null;
+            customStrikes.put = null;
+            updateWidth();
+
+            // Refresh to get original LTP/delta values
+            if (lastMarketData) {
+                if (lastMarketData.call) {
+                    document.getElementById('callLtp').textContent = '₹' + lastMarketData.call.ltp?.toFixed(2);
+                    document.getElementById('callDelta').textContent = lastMarketData.call.delta?.toFixed(4);
+                }
+                if (lastMarketData.put) {
+                    document.getElementById('putLtp').textContent = '₹' + lastMarketData.put.ltp?.toFixed(2);
+                    document.getElementById('putDelta').textContent = lastMarketData.put.delta?.toFixed(4);
+                }
+                document.getElementById('totalPremium').textContent = lastMarketData.total_premium_all_lots?.toLocaleString('en-IN', {maximumFractionDigits: 2});
+            }
+        }
+
+        function manualRefresh() {
+            const btn = document.querySelector('.refresh-btn');
+            btn.classList.add('spinning');
+
+            // Refresh market data (without resetting signal timer - that's handled server-side)
+            Promise.all([
+                fetch('/api/market/data').then(r => r.json()),
+                fetch('/api/positions').then(r => r.json()),
+                fetch('/api/history').then(r => r.json())
+            ]).then(([marketData, posData, histData]) => {
+                // Update market data display (same as refreshMarketData but inline)
+                if (!marketData.error) {
+                    lastMarketData = marketData;
+                    document.getElementById('spotPrice').textContent = marketData.spot?.toLocaleString('en-IN', {maximumFractionDigits: 2}) || '--';
+                    document.getElementById('atmStrike').textContent = marketData.atm_strike?.toLocaleString('en-IN') || '--';
+                    document.getElementById('straddlePrice').textContent = marketData.straddle_price?.toFixed(2) || '--';
+                    document.getElementById('straddleVwap').textContent = marketData.straddle_vwap?.toFixed(2) || '--';
+                    document.getElementById('lastUpdate').textContent = marketData.timestamp;
+
+                    if (marketData.call) {
+                        document.getElementById('callStrike').textContent = marketData.call.strike;
+                        document.getElementById('callLtp').textContent = '₹' + marketData.call.ltp?.toFixed(2);
+                        document.getElementById('callDelta').textContent = marketData.call.delta?.toFixed(4);
+                    }
+                    if (marketData.put) {
+                        document.getElementById('putStrike').textContent = marketData.put.strike;
+                        document.getElementById('putLtp').textContent = '₹' + marketData.put.ltp?.toFixed(2);
+                        document.getElementById('putDelta').textContent = marketData.put.delta?.toFixed(4);
+                    }
+                    document.getElementById('totalPremium').textContent = marketData.total_premium_all_lots?.toLocaleString('en-IN', {maximumFractionDigits: 2});
+                }
+
+                // Update positions - call the same function used for auto-refresh
+                updatePositionsDisplay(posData);
+
+                // Update history display
+                updateHistoryDisplay(histData);
+
+                btn.classList.remove('spinning');
+            }).catch(err => {
+                console.error('Refresh error:', err);
+                btn.classList.remove('spinning');
+            });
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            checkConnection();
+            loadSettings();
+            initManualProfit();
+            startRefresh();
+        });
+
+        function checkConnection() {
+            fetch('/api/connection/status')
+                .then(res => res.json())
+                .then(data => {
+                    const dot = document.getElementById('connectionDot');
+                    const text = document.getElementById('connectionText');
+                    const userInfo = document.getElementById('userInfo');
+                    const loginForm = document.getElementById('loginForm');
+
+                    if (data.connected) {
+                        dot.classList.add('connected');
+                        text.textContent = 'Connected';
+                        document.getElementById('userName').textContent = data.user;
+                        userInfo.style.display = 'block';
+                        loginForm.style.display = 'none';
+                    } else {
+                        dot.classList.remove('connected');
+                        text.textContent = 'Disconnected';
+                        userInfo.style.display = 'none';
+                        loginForm.style.display = 'block';
+                    }
+                });
+        }
+
+        function loadSettings() {
+            fetch('/api/config')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('liveTrading').checked = !data.paper_trading;
+                    document.getElementById('lotQuantity').value = data.lot_quantity;
+                    document.getElementById('lotSize').textContent = data.lot_size;
+                    document.getElementById('totalQty').textContent = data.lot_quantity * data.lot_size;
+                    document.getElementById('lotsDisplay').textContent = data.lot_quantity;
+                });
+        }
+
+        function updateSettings() {
+            const liveTrading = document.getElementById('liveTrading').checked;
+            const lotQuantity = parseInt(document.getElementById('lotQuantity').value);
+            const lotSize = parseInt(document.getElementById('lotSize').textContent);
+
+            document.getElementById('totalQty').textContent = lotQuantity * lotSize;
+            document.getElementById('lotsDisplay').textContent = lotQuantity;
+
+            fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    paper_trading: !liveTrading,
+                    lot_quantity: lotQuantity
+                })
+            });
+        }
+
+        function getLoginLink() {
+            fetch('/api/login/url')
+                .then(res => res.json())
+                .then(data => {
+                    const container = document.getElementById('loginLinkContainer');
+                    const link = document.getElementById('loginLink');
+                    link.href = data.url;
+                    link.textContent = data.url;
+                    container.style.display = 'block';
+                });
+        }
+
+        function submitToken() {
+            const token = document.getElementById('requestToken').value;
+            if (!token) return;
+
+            fetch('/api/login/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ request_token: token })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    checkConnection();
+                    document.getElementById('requestToken').value = '';
+                } else {
+                    alert('Login failed: ' + data.error);
+                }
+            });
+        }
+
+        function startRefresh() {
+            refreshMarketData();
+            refreshPositions();
+            refreshHistory();
+            refreshInterval = setInterval(refreshMarketData, 60000);    // 1 minute
+            positionInterval = setInterval(refreshPositions, 60000);    // 1 minute
+            historyInterval = setInterval(refreshHistory, 60000);       // 1 minute
+        }
+
+        function refreshMarketData() {
+            fetch('/api/market/data')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        console.log('Market data error:', data.error);
+                        return;
+                    }
+
+                    lastMarketData = data;
+
+                    // Market status
+                    const statusEl = document.getElementById('marketStatus');
+                    const statusText = document.getElementById('marketStatusText');
+                    if (data.market_status === 'open') {
+                        statusEl.classList.remove('closed');
+                        statusEl.classList.add('open');
+                        statusText.textContent = 'Market Open';
+                    } else {
+                        statusEl.classList.remove('open');
+                        statusEl.classList.add('closed');
+                        statusText.textContent = 'Market Closed';
+                    }
+
+                    // Prices
+                    document.getElementById('spotPrice').textContent = data.spot?.toLocaleString('en-IN', {maximumFractionDigits: 2}) || '--';
+                    document.getElementById('atmStrike').textContent = data.atm_strike?.toLocaleString('en-IN') || '--';
+                    document.getElementById('straddlePrice').textContent = data.straddle_price?.toFixed(2) || '--';
+                    document.getElementById('straddleVwap').textContent = data.straddle_vwap?.toFixed(2) || '--';
+
+                    const diffEl = document.getElementById('vwapDiff');
+                    if (data.vwap_diff !== undefined) {
+                        const sign = data.vwap_diff >= 0 ? '+' : '';
+                        diffEl.textContent = sign + data.vwap_diff.toFixed(2);
+                        diffEl.className = 'value ' + (data.vwap_diff >= 0 ? 'positive' : 'negative');
+                    }
+
+                    // Signal
+                    const signalStatus = document.getElementById('signalStatus');
+                    const signalProgress = document.getElementById('signalProgress');
+                    const signalDuration = document.getElementById('signalDuration');
+
+                    if (data.signal) {
+                        const progress = Math.min((data.signal.duration / data.signal.required) * 100, 100);
+                        signalProgress.style.width = progress + '%';
+
+                        const mins = Math.floor(data.signal.duration / 60);
+                        const secs = Math.floor(data.signal.duration % 60);
+                        signalDuration.textContent = `${mins}m ${secs}s`;
+
+                        if (data.signal.entry_ready) {
+                            signalStatus.textContent = 'ENTRY READY';
+                            signalStatus.className = 'signal-status ready';
+                        } else if (data.signal.active) {
+                            signalStatus.textContent = 'Active';
+                            signalStatus.className = 'signal-status active';
+                        } else {
+                            signalStatus.textContent = 'Inactive';
+                            signalStatus.className = 'signal-status';
+                        }
+
+                        document.getElementById('tradingWindow').textContent = data.signal.current_window || 'Closed';
+                        document.getElementById('morningTrades').textContent = data.signal.morning_trades;
+                        document.getElementById('afternoonTrades').textContent = data.signal.afternoon_trades;
+
+                        // Enable trade button if ready
+                        const tradeBtn = document.getElementById('tradeBtn');
+                        tradeBtn.disabled = !data.signal.entry_ready;
+                    }
+
+                    // Strangle details - store original strikes
+                    if (data.call) {
+                        originalStrikes.call = data.call.strike;
+                        // Only update if not modified by user
+                        if (!customStrikes.call) {
+                            document.getElementById('callStrike').textContent = data.call.strike;
+                            document.getElementById('callStrike').classList.remove('strike-modified');
+                        }
+                        document.getElementById('callLtp').textContent = '₹' + data.call.ltp?.toFixed(2);
+                        document.getElementById('callDelta').textContent = data.call.delta?.toFixed(4);
+                    }
+
+                    if (data.put) {
+                        originalStrikes.put = data.put.strike;
+                        // Only update if not modified by user
+                        if (!customStrikes.put) {
+                            document.getElementById('putStrike').textContent = data.put.strike;
+                            document.getElementById('putStrike').classList.remove('strike-modified');
+                        }
+                        document.getElementById('putLtp').textContent = '₹' + data.put.ltp?.toFixed(2);
+                        document.getElementById('putDelta').textContent = data.put.delta?.toFixed(4);
+                    }
+
+                    // Update width based on displayed strikes
+                    updateWidth();
+                    document.getElementById('expiry').textContent = data.expiry;
+                    document.getElementById('dte').textContent = data.dte;
+                    document.getElementById('totalPremium').textContent = data.total_premium_all_lots?.toLocaleString('en-IN', {maximumFractionDigits: 2});
+
+                    document.getElementById('lastUpdate').textContent = data.timestamp;
+                });
+        }
+
+        function updatePositionsDisplay(data) {
+            const container = document.getElementById('positionsContainer');
+            const totalPnl = document.getElementById('totalPnl');
+
+            if (!data.positions || data.positions.length === 0) {
+                container.innerHTML = '<div class="no-positions">No open positions</div>';
+                totalPnl.textContent = '₹0.00';
+                totalPnl.className = 'value';
+                return;
+            }
+
+            let html = '';
+            data.positions.forEach(pos => {
+                const pnlClass = pos.pnl >= 0 ? 'positive' : 'negative';
+                const pnlSign = pos.pnl >= 0 ? '+' : '';
+                html += `
+                    <div class="position-card">
+                        <div class="position-header">
+                            <span class="position-symbol">${pos.symbol}</span>
+                            <span class="position-pnl ${pnlClass}">${pnlSign}₹${pos.pnl.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
+                        </div>
+                        <div class="position-details">
+                            <span>Qty: ${pos.quantity}</span>
+                            <span>Avg: ₹${pos.average_price.toFixed(2)}</span>
+                            <span>LTP: ₹${pos.ltp.toFixed(2)}</span>
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+
+            const total = data.total_pnl || 0;
+            const totalClass = total >= 0 ? 'positive' : 'negative';
+            const totalSign = total >= 0 ? '+' : '';
+            totalPnl.textContent = `${totalSign}₹${total.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
+            totalPnl.className = 'value ' + totalClass;
+        }
+
+        function refreshPositions() {
+            fetch('/api/positions')
+                .then(res => res.json())
+                .then(data => updatePositionsDisplay(data));
+        }
+
+        function updateHistoryDisplay(data) {
+            // Update manual profits from API response
+            if (data.manual_profits) {
+                manualProfits = data.manual_profits;
+            }
+
+            // Update summary cards
+            const bookedProfitEl = document.getElementById('bookedProfit');
+            const openPnlEl = document.getElementById('openPnl');
+            const totalProfitEl = document.getElementById('totalProfit');
+            const manualProfitEl = document.getElementById('manualProfitDisplay');
+
+            const booked = data.booked_profit || 0;
+            const open = data.open_pnl || 0;
+            const manual = data.total_manual || 0;
+            const total = data.total || (manual + booked + open);
+
+            manualProfitEl.textContent = `${manual >= 0 ? '+' : ''}₹${manual.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
+            manualProfitEl.className = 'value ' + (manual >= 0 ? 'positive' : 'negative');
+
+            bookedProfitEl.textContent = `${booked >= 0 ? '+' : ''}₹${booked.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
+            bookedProfitEl.className = 'value ' + (booked >= 0 ? 'positive' : 'negative');
+
+            openPnlEl.textContent = `${open >= 0 ? '+' : ''}₹${open.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
+            openPnlEl.className = 'value ' + (open >= 0 ? 'positive' : 'negative');
+
+            totalProfitEl.textContent = `${total >= 0 ? '+' : ''}₹${total.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
+            totalProfitEl.className = 'value ' + (total >= 0 ? 'positive' : 'negative');
+
+            // Show data source
+            const sourceEl = document.getElementById('historySource');
+            if (data.source) {
+                sourceEl.textContent = `Source: ${data.source}`;
+            }
+
+            // Update expiry breakdown
+            const container = document.getElementById('historyContainer');
+            if (!data.by_expiry || data.by_expiry.length === 0) {
+                container.innerHTML = '<div class="no-positions">No trade history</div>';
+                return;
+            }
+
+            let html = '';
+            data.by_expiry.forEach(exp => {
+                const manualVal = manualProfits[exp.expiry] || 0;
+                const expiryTotal = manualVal + exp.booked + exp.open;
+                const pnlClass = expiryTotal >= 0 ? 'positive' : 'negative';
+                const pnlSign = expiryTotal >= 0 ? '+' : '';
+                html += `
+                    <div class="expiry-card" data-expiry="${exp.expiry}" data-booked="${exp.booked}" data-open="${exp.open}">
+                        <div class="expiry-header">
+                            <span class="expiry-date">${exp.expiry}</span>
+                            <span class="expiry-pnl ${pnlClass}">${pnlSign}₹${expiryTotal.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
+                        </div>
+                        <div class="expiry-details">
+                            <div class="expiry-row manual-row">
+                                <span>Manual</span>
+                                <span style="display:flex; align-items:center; gap:2px;">
+                                    <span>₹</span>
+                                    <input type="number" id="manual_${exp.expiry}" value="${manualVal}"
+                                        onchange="updateManualProfit('${exp.expiry}')"
+                                        style="width:70px; text-align:right; padding:2px 4px; border:1px solid #ddd; border-radius:3px; font-size:0.65rem;">
+                                </span>
+                            </div>
+                            <div class="expiry-row">
+                                <span>Booked</span>
+                                <span class="${exp.booked >= 0 ? 'positive' : 'negative'}">${exp.booked >= 0 ? '+' : ''}₹${exp.booked.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
+                            </div>
+                            <div class="expiry-row">
+                                <span>Open</span>
+                                <span class="${exp.open >= 0 ? 'positive' : 'negative'}">${exp.open >= 0 ? '+' : ''}₹${exp.open.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        function refreshHistory() {
+            fetch('/api/history')
+                .then(res => res.json())
+                .then(data => updateHistoryDisplay(data))
+                .catch(err => console.error('History fetch error:', err));
+        }
+
+        function syncHistory() {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Syncing...';
+
+            fetch('/api/history/sync', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(data.message);
+                        refreshHistory();
+                    } else {
+                        alert('Sync failed: ' + data.error);
+                    }
+                    btn.disabled = false;
+                    btn.textContent = 'Sync';
+                })
+                .catch(err => {
+                    alert('Sync error: ' + err);
+                    btn.disabled = false;
+                    btn.textContent = 'Sync';
+                });
+        }
+
+        function updateManualProfit(expiry) {
+            const input = document.getElementById(`manual_${expiry}`);
+            const value = parseFloat(input.value) || 0;
+            manualProfits[expiry] = value;
+
+            // Save to CSV via API
+            fetch('/api/history/manual', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ expiry: expiry, profit: value })
+            }).catch(err => console.error('Error saving manual profit:', err));
+
+            // Recalculate totals
+            recalculateHistoryTotals();
+        }
+
+        function getTotalManualProfit() {
+            return Object.values(manualProfits).reduce((sum, val) => sum + (val || 0), 0);
+        }
+
+        function recalculateHistoryTotals() {
+            // Get current booked and open from displayed values
+            const bookedText = document.getElementById('bookedProfit').textContent;
+            const openText = document.getElementById('openPnl').textContent;
+            const booked = parseFloat(bookedText.replace(/[₹,+]/g, '')) || 0;
+            const open = parseFloat(openText.replace(/[₹,+]/g, '')) || 0;
+            const manual = getTotalManualProfit();
+            const total = manual + booked + open;
+
+            // Update manual display
+            const manualEl = document.getElementById('manualProfitDisplay');
+            manualEl.textContent = `${manual >= 0 ? '+' : ''}₹${manual.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
+            manualEl.className = 'value ' + (manual >= 0 ? 'positive' : 'negative');
+
+            // Update total
+            const totalEl = document.getElementById('totalProfit');
+            totalEl.textContent = `${total >= 0 ? '+' : ''}₹${total.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
+            totalEl.className = 'value ' + (total >= 0 ? 'positive' : 'negative');
+
+            // Update per-expiry totals
+            document.querySelectorAll('.expiry-card').forEach(card => {
+                const expiry = card.dataset.expiry;
+                if (!expiry) return;
+                const manualVal = manualProfits[expiry] || 0;
+                const bookedVal = parseFloat(card.dataset.booked) || 0;
+                const openVal = parseFloat(card.dataset.open) || 0;
+                const expiryTotal = manualVal + bookedVal + openVal;
+                const pnlEl = card.querySelector('.expiry-pnl');
+                pnlEl.textContent = `${expiryTotal >= 0 ? '+' : ''}₹${expiryTotal.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
+                pnlEl.className = 'expiry-pnl ' + (expiryTotal >= 0 ? 'positive' : 'negative');
+            });
+        }
+
+        function initManualProfit() {
+            // Load from CSV via API
+            fetch('/api/history/manual')
+                .then(res => res.json())
+                .then(data => {
+                    manualProfits = data || {};
+                })
+                .catch(err => console.error('Error loading manual profits:', err));
+        }
+
+        function showTradeConfirm() {
+            if (!lastMarketData) return;
+
+            // Use custom strikes if set, otherwise use market data
+            const callStrike = customStrikes.call || lastMarketData.call.strike;
+            const putStrike = customStrikes.put || lastMarketData.put.strike;
+
+            const modal = document.getElementById('tradeModal');
+
+            // Show modified indicator if strikes were changed
+            const callModified = customStrikes.call ? ' (modified)' : '';
+            const putModified = customStrikes.put ? ' (modified)' : '';
+
+            document.getElementById('modalCall').textContent = `${callStrike}${callModified} @ ₹${lastMarketData.call.ltp.toFixed(2)}`;
+            document.getElementById('modalPut').textContent = `${putStrike}${putModified} @ ₹${lastMarketData.put.ltp.toFixed(2)}`;
+            document.getElementById('modalQty').textContent = `${lastMarketData.lots} lots (${lastMarketData.total_qty} qty)`;
+            document.getElementById('modalPremium').textContent = `₹${lastMarketData.total_premium_all_lots.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
+            document.getElementById('tradeAlert').innerHTML = '';
+
+            modal.classList.add('show');
+        }
+
+        function closeModal() {
+            document.getElementById('tradeModal').classList.remove('show');
+        }
+
+        function executeTrade() {
+            const btn = document.getElementById('confirmTradeBtn');
+            btn.disabled = true;
+            btn.textContent = 'Placing...';
+
+            // Send custom strikes if modified
+            const payload = {};
+            if (customStrikes.call) payload.call_strike = customStrikes.call;
+            if (customStrikes.put) payload.put_strike = customStrikes.put;
+
+            fetch('/api/trade/execute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(res => res.json())
+            .then(data => {
+                const alertDiv = document.getElementById('tradeAlert');
+
+                if (data.success) {
+                    alertDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            Trade executed successfully!<br>
+                            Call Order: ${data.call_order?.order_id}<br>
+                            Put Order: ${data.put_order?.order_id}
+                        </div>
+                    `;
+                    // Reset custom strikes after successful trade
+                    resetStrikes();
+                    setTimeout(() => {
+                        closeModal();
+                        refreshMarketData();
+                        refreshPositions();
+                    }, 2000);
+                } else {
+                    alertDiv.innerHTML = `
+                        <div class="alert alert-error">
+                            Trade failed: ${data.error}
+                        </div>
+                    `;
+                }
+
+                btn.disabled = false;
+                btn.textContent = 'Confirm Trade';
+            });
+        }
+    </script>
+</body>
+</html>

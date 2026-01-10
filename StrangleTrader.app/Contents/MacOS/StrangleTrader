@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Open Terminal and run the server
+osascript -e 'tell application "Terminal"
+    activate
+    do script "cd /Users/jay/Desktop/sd_automation && source venv/bin/activate && python run.py --ui"
+end tell'
+
+# Wait for server to start then open browser
+sleep 4
+open "http://localhost:8080"

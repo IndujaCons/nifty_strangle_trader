@@ -1,0 +1,26 @@
+Summary
+
+  Your automation is ready:
+
+  # Activate virtual environment first
+  cd /Users/jay/Desktop/sd_automation
+  source venv/bin/activate
+
+  # Test (anytime)
+  python main.py --test
+
+  # Run paper trading (during market hours)
+  python main.py
+
+  # For live trading later
+  python main.py --login     # Get Kite login URL
+  python main.py --live      # Run with real trades
+
+  What it does:
+  - Checks for 14 DTE Nifty options
+  - Enters strangle (6-8 delta) when straddle > VWAP
+  - Max 2 entries per day, capital in 6 parts
+  - Exits at 50% profit target
+  - Runs every 60 seconds during market hours
+
+  Try it tomorrow during market hours (9:15 AM IST onwards) and it will start collecting VWAP data and looking for entry signals.
