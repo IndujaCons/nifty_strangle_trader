@@ -773,7 +773,11 @@
 
                     <div id="userInfo" class="user-info" style="display: none;">
                         <div class="name" id="userName"></div>
-                        <div class="status-text" style="color: #51cf66; font-size: 0.8rem; margin-top: 5px;">Connected</div>
+                        <div class="status-text" style="color: #51cf66; font-size: 0.7rem; margin-top: 3px;">Connected</div>
+                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #c8e6c8;">
+                            <div style="font-size: 0.6rem; color: #888; text-transform: uppercase;">Available Margin</div>
+                            <div id="availableMargin" style="font-size: 0.9rem; font-weight: 600; color: #4a7c4a;">₹--</div>
+                        </div>
                     </div>
                     <div id="loginForm" class="login-form">
                         <button class="btn btn-primary" onclick="getLoginLink()">Get Link for Request Token</button>
@@ -900,6 +904,10 @@
                         <span class="label">Expiry</span>
                         <span class="value"><span id="expiry">--</span> (<span id="dte">--</span> DTE)</span>
                     </div>
+                    <div class="strangle-row">
+                        <span class="label">Margin Required</span>
+                        <span class="value">₹<span id="marginRequired">--</span></span>
+                    </div>
                     <div class="strangle-row" style="background: #f0fdf0; margin: 10px -14px -14px; padding: 12px 14px; border-radius: 0 0 4px 4px; border-top: 1px solid #c8e6c8;">
                         <span class="label">Total Premium (<span id="lotsDisplay">6</span> lots)</span>
                         <span class="value positive" style="font-size: 1.1rem;">₹<span id="totalPremium">--</span></span>
@@ -936,6 +944,10 @@
                 <!-- History Tab -->
                 <div id="historyTab" class="tab-content" style="display: none;">
                     <div class="history-summary">
+                        <div class="summary-card">
+                            <label>Max Profit</label>
+                            <div class="value" id="maxProfitDisplay" style="color: #1976d2;">₹0</div>
+                        </div>
                         <div class="summary-card">
                             <label>Manual</label>
                             <div class="value" id="manualProfitDisplay">₹0</div>
@@ -1227,6 +1239,8 @@
                         dot.classList.add('connected');
                         text.textContent = 'Connected';
                         document.getElementById('userName').textContent = data.user;
+                        document.getElementById('availableMargin').textContent =
+                            '₹' + (data.available_margin?.toLocaleString('en-IN', {maximumFractionDigits: 0}) || '--');
                         userInfo.style.display = 'block';
                         loginForm.style.display = 'none';
                     } else {
@@ -1406,6 +1420,7 @@
                     updateWidth();
                     document.getElementById('expiry').textContent = data.expiry;
                     document.getElementById('dte').textContent = data.dte;
+                    document.getElementById('marginRequired').textContent = data.margin_required?.toLocaleString('en-IN', {maximumFractionDigits: 0}) || '--';
                     document.getElementById('totalPremium').textContent = data.total_premium_all_lots?.toLocaleString('en-IN', {maximumFractionDigits: 2});
 
                     document.getElementById('lastUpdate').textContent = data.timestamp;
@@ -1467,11 +1482,17 @@
             const openPnlEl = document.getElementById('openPnl');
             const totalProfitEl = document.getElementById('totalProfit');
             const manualProfitEl = document.getElementById('manualProfitDisplay');
+            const maxProfitEl = document.getElementById('maxProfitDisplay');
 
             const booked = data.booked_profit || 0;
             const open = data.open_pnl || 0;
             const manual = data.total_manual || 0;
             const total = data.total || (manual + booked + open);
+            // Max profit = open positions max + booked profit + manual profit
+            const openMaxProfit = data.max_profit || 0;
+            const maxProfit = openMaxProfit + booked + manual;
+
+            maxProfitEl.textContent = `₹${maxProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})}`;
 
             manualProfitEl.textContent = `${manual >= 0 ? '+' : ''}₹${manual.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
             manualProfitEl.className = 'value ' + (manual >= 0 ? 'positive' : 'negative');
@@ -1504,13 +1525,44 @@
                 const expiryTotal = manualVal + exp.booked + exp.open;
                 const pnlClass = expiryTotal >= 0 ? 'positive' : 'negative';
                 const pnlSign = expiryTotal >= 0 ? '+' : '';
+                // Use API-calculated values
+                const expiryMaxProfit = exp.total_max_profit || 0;
+                const profitPct = exp.profit_pct || 0;
+                const exitTriggered = exp.exit_triggered || false;
+                const hasOpenPositions = exp.open_positions > 0;
+
+                // Alert styling when 50% profit reached
+                const cardStyle = exitTriggered ? 'border: 2px solid #4caf50; background: #e8f5e9;' : '';
+                const alertBadge = exitTriggered ? `<span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.6rem; margin-left: 6px;">50% TARGET</span>` : '';
+
+                const targetProfit = expiryMaxProfit * 0.5;
+                const maxProfitRow = expiryMaxProfit > 0 ? `
+                            <div class="expiry-row">
+                                <span style="color: #1976d2; font-weight: 600;">Max Profit</span>
+                                <span style="color: #1976d2; font-weight: 600;">₹${expiryMaxProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})} <span style="font-size: 0.6rem; color: #666;">(${profitPct}%)</span></span>
+                            </div>
+                            <div class="expiry-row" style="border-bottom: 1px solid #eee; padding-bottom: 4px; margin-bottom: 4px;">
+                                <span style="color: #4caf50; font-weight: 600;">Target (50%)</span>
+                                <span style="color: #4caf50; font-weight: 600;">₹${targetProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})}</span>
+                            </div>` : '';
+
+                // Exit All button (only show if there are open positions)
+                const exitButton = hasOpenPositions ? `
+                            <div class="expiry-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+                                <button onclick="exitAllPositions('${exp.expiry}')"
+                                    style="width: 100%; padding: 6px; background: ${exitTriggered ? '#4caf50' : '#ff5722'}; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-weight: 600;">
+                                    ${exitTriggered ? '✓ EXIT ALL (50% reached)' : 'Exit All Positions'}
+                                </button>
+                            </div>` : '';
+
                 html += `
-                    <div class="expiry-card" data-expiry="${exp.expiry}" data-booked="${exp.booked}" data-open="${exp.open}">
+                    <div class="expiry-card" data-expiry="${exp.expiry}" data-booked="${exp.booked}" data-open="${exp.open}" style="${cardStyle}">
                         <div class="expiry-header">
-                            <span class="expiry-date">${exp.expiry}</span>
+                            <span class="expiry-date">${exp.expiry}${alertBadge}</span>
                             <span class="expiry-pnl ${pnlClass}">${pnlSign}₹${expiryTotal.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
                         </div>
                         <div class="expiry-details">
+                            ${maxProfitRow}
                             <div class="expiry-row manual-row">
                                 <span>Manual</span>
                                 <span style="display:flex; align-items:center; gap:2px;">
@@ -1528,6 +1580,7 @@
                                 <span>Open</span>
                                 <span class="${exp.open >= 0 ? 'positive' : 'negative'}">${exp.open >= 0 ? '+' : ''}₹${exp.open.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
                             </div>
+                            ${exitButton}
                         </div>
                     </div>
                 `;
@@ -1563,6 +1616,39 @@
                     alert('Sync error: ' + err);
                     btn.disabled = false;
                     btn.textContent = 'Sync';
+                });
+        }
+
+        function exitAllPositions(expiry) {
+            if (!confirm(`Exit ALL positions for expiry ${expiry}?\n\nThis will place MARKET orders to close all open positions.`)) {
+                return;
+            }
+
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Exiting...';
+
+            fetch('/api/positions/exit-expiry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ expiry: expiry })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(`Success! ${data.message}\n\nOrders placed:\n${data.orders_placed.map(o => `${o.type} ${o.qty} ${o.symbol}`).join('\n')}`);
+                        refreshHistory();
+                        refreshPositions();
+                    } else {
+                        alert('Exit failed: ' + (data.error || data.message));
+                    }
+                    btn.disabled = false;
+                    btn.textContent = 'Exit All Positions';
+                })
+                .catch(err => {
+                    alert('Exit error: ' + err);
+                    btn.disabled = false;
+                    btn.textContent = 'Exit All Positions';
                 });
         }
 

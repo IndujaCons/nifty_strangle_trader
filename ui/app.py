@@ -111,10 +111,21 @@ def connection_status():
 
         provider.kite.set_access_token(access_token)
         profile = provider.kite.profile()
+
+        # Get available margin (equity.net = Available Margin in Zerodha)
+        available_margin = 0
+        try:
+            margins = provider.kite.margins()
+            equity = margins.get("equity", {})
+            available_margin = equity.get("net", 0)
+        except:
+            pass
+
         return jsonify({
             "connected": True,
             "user": profile["user_name"],
             "email": profile.get("email", ""),
+            "available_margin": available_margin,
         })
     except Exception as e:
         return jsonify({"connected": False, "user": None, "error": str(e)})
@@ -209,6 +220,57 @@ def market_data():
         total_qty = config["lot_size"] * config["lot_quantity"]
         total_premium = data.per_lot * config["lot_quantity"]
 
+        # Calculate margin required using Kite's margins API
+        total_margin = 0
+        try:
+            ce_symbol = provider.get_trading_symbol(data.expiry, data.call_strike, "CE")
+            pe_symbol = provider.get_trading_symbol(data.expiry, data.put_strike, "PE")
+
+            margin_params = [
+                {
+                    "exchange": "NFO",
+                    "tradingsymbol": ce_symbol,
+                    "transaction_type": "SELL",
+                    "variety": "regular",
+                    "product": "NRML",
+                    "order_type": "MARKET",
+                    "quantity": total_qty
+                },
+                {
+                    "exchange": "NFO",
+                    "tradingsymbol": pe_symbol,
+                    "transaction_type": "SELL",
+                    "variety": "regular",
+                    "product": "NRML",
+                    "order_type": "MARKET",
+                    "quantity": total_qty
+                }
+            ]
+
+            # Try basket_margins first (for combined margin with span benefit)
+            if hasattr(provider.kite, 'basket_margins'):
+                margin_response = provider.kite.basket_margins(margin_params)
+                total_margin = margin_response.get('final', {}).get('total', 0)
+            else:
+                # Fall back to direct API call for basket margins
+                import requests
+                headers = {
+                    "Authorization": f"token {provider.api_key}:{provider.kite.access_token}",
+                    "Content-Type": "application/json"
+                }
+                response = requests.post(
+                    "https://api.kite.trade/margins/basket",
+                    json=margin_params,
+                    headers=headers
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    final_data = result.get('data', {}).get('final', {})
+                    total_margin = final_data.get('total', 0)
+                    print(f"Basket margin: ₹{total_margin:,.0f}")
+        except Exception as e:
+            print(f"Margin calculation error: {e}")
+
         last_data = {
             "timestamp": now.strftime("%H:%M:%S"),
             "market_status": market_status,
@@ -238,6 +300,7 @@ def market_data():
             "lots": config["lot_quantity"],
             "total_qty": total_qty,
             "total_premium_all_lots": total_premium,
+            "margin_required": total_margin,
             "signal": {
                 "active": signal_info["signal_active"],
                 "duration": signal_info["duration_seconds"],
@@ -477,7 +540,8 @@ def history():
                         'booked': 0,
                         'open': 0,
                         'open_positions': 0,
-                        'closed_positions': 0
+                        'closed_positions': 0,
+                        'max_profit': 0
                     }
 
                 # Get P&L values
@@ -490,6 +554,11 @@ def history():
                     live_expiry_data[expiry_key]['open'] += unrealised
                     live_expiry_data[expiry_key]['booked'] += realised
                     live_expiry_data[expiry_key]['open_positions'] += 1
+                    # Max profit for sold options = premium collected = average_price × abs(quantity)
+                    if pos['quantity'] < 0:  # Sold position
+                        avg_price = pos.get('average_price', 0)
+                        max_profit_for_position = avg_price * abs(pos['quantity'])
+                        live_expiry_data[expiry_key]['max_profit'] += max_profit_for_position
                 else:
                     # Closed position - add to booked
                     live_expiry_data[expiry_key]['booked'] += pnl
@@ -512,7 +581,8 @@ def history():
             'booked': data['booked'],
             'open': 0,
             'open_positions': 0,
-            'closed_positions': data['closed_positions']
+            'closed_positions': data['closed_positions'],
+            'max_profit': 0
         }
 
     # Overlay live data (current open positions)
@@ -523,6 +593,7 @@ def history():
             # Add live open P&L to existing entry
             merged_data[expiry_display]['open'] = data['open']
             merged_data[expiry_display]['open_positions'] = data['open_positions']
+            merged_data[expiry_display]['max_profit'] = data['max_profit']
             # Update booked if we have realised profit from open positions today
             if data['booked'] > 0 and data['open_positions'] > 0:
                 # This is realised profit from partial closing - handled separately
@@ -534,28 +605,45 @@ def history():
     # Calculate totals
     total_booked = sum(e['booked'] for e in merged_data.values())
     total_open = sum(e['open'] for e in merged_data.values())
+    total_max_profit = sum(e['max_profit'] for e in merged_data.values())
+
+    # Get manual profits first (needed for profit % calculation)
+    manual_profits = history_manager.get_manual_profits()
+    total_manual = sum(manual_profits.values())
 
     # Format response - sort by expiry descending
     by_expiry = []
     for expiry, data in sorted(merged_data.items(), key=lambda x: x[0], reverse=True):
-        # Only include if there's any P&L
-        if data['booked'] != 0 or data['open'] != 0:
+        # Only include if there's any P&L or max_profit
+        if data['booked'] != 0 or data['open'] != 0 or data['max_profit'] != 0:
+            manual_val = manual_profits.get(data['expiry'], 0)
+            # Max profit = open positions max + booked + manual
+            total_max_profit_expiry = data['max_profit'] + data['booked'] + manual_val
+            # Current P&L = booked + open + manual
+            current_pnl = data['booked'] + data['open'] + manual_val
+            # Profit percentage
+            profit_pct = (current_pnl / total_max_profit_expiry * 100) if total_max_profit_expiry > 0 else 0
+            # Trigger at 50%
+            exit_triggered = profit_pct >= 50 and data['open_positions'] > 0
+
             by_expiry.append({
                 'expiry': data['expiry'],
                 'booked': data['booked'],
                 'open': data['open'],
                 'total_pnl': data['booked'] + data['open'],
                 'open_positions': data['open_positions'],
-                'closed_positions': data['closed_positions']
+                'closed_positions': data['closed_positions'],
+                'max_profit': data['max_profit'],
+                'total_max_profit': total_max_profit_expiry,
+                'current_pnl': current_pnl,
+                'profit_pct': round(profit_pct, 1),
+                'exit_triggered': exit_triggered
             })
-
-    # Get manual profits
-    manual_profits = history_manager.get_manual_profits()
-    total_manual = sum(manual_profits.values())
 
     return jsonify({
         'booked_profit': total_booked,
         'open_pnl': total_open,
+        'max_profit': total_max_profit,
         'manual_profits': manual_profits,
         'total_manual': total_manual,
         'total': total_manual + total_booked + total_open,
@@ -638,6 +726,109 @@ def set_manual_profit():
 
     success = history_manager.set_manual_profit(expiry, profit)
     return jsonify({"success": success})
+
+
+@app.route("/api/positions/exit-expiry", methods=["POST"])
+def exit_expiry_positions():
+    """Exit all open positions for a given expiry."""
+    global provider
+    import re
+
+    data = request.json
+    expiry = data.get("expiry")  # Format: "20-01-2026"
+
+    if not expiry:
+        return jsonify({"success": False, "error": "Expiry required"})
+
+    if provider is None:
+        init_provider()
+
+    try:
+        access_token = os.getenv("KITE_ACCESS_TOKEN", "")
+        if not access_token:
+            return jsonify({"success": False, "error": "Not logged in"})
+
+        provider.kite.set_access_token(access_token)
+        positions = provider.kite.positions()
+        net_positions = positions.get('net', [])
+
+        # Convert expiry format "20-01-2026" to match symbol pattern
+        # Symbol format: NIFTY26120 (YY M DD) or NIFTY26JAN (YY MON DD)
+        expiry_parts = expiry.split('-')
+        if len(expiry_parts) == 3:
+            day, month, year = expiry_parts
+            # Create pattern like "26120" or "261" for matching
+            yy = year[2:4]
+            # Month mapping for weekly expiries
+            month_map = {'01': '1', '02': '2', '03': '3', '04': '4', '05': '5', '06': '6',
+                        '07': '7', '08': '8', '09': '9', '10': 'O', '11': 'N', '12': 'D'}
+            m = month_map.get(month, month)
+            expiry_pattern = f"{yy}{m}{day}"
+
+        orders_placed = []
+        errors = []
+
+        for pos in net_positions:
+            symbol = pos['tradingsymbol']
+            qty = pos['quantity']
+
+            # Skip if not NIFTY option or no open position
+            if not symbol.startswith('NIFTY') or qty == 0:
+                continue
+
+            # Check if this position matches the expiry
+            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})', symbol)
+            if not match:
+                continue
+
+            pos_expiry = match.group(1)
+            if pos_expiry != expiry_pattern:
+                continue
+
+            # Place exit order (BUY to close SELL, or SELL to close BUY)
+            transaction_type = "BUY" if qty < 0 else "SELL"
+            exit_qty = abs(qty)
+
+            try:
+                # Check if paper trading
+                paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
+
+                if paper_trading:
+                    orders_placed.append({
+                        "symbol": symbol,
+                        "qty": exit_qty,
+                        "type": transaction_type,
+                        "status": "PAPER_TRADE"
+                    })
+                else:
+                    order_id = provider.kite.place_order(
+                        variety="regular",
+                        exchange="NFO",
+                        tradingsymbol=symbol,
+                        transaction_type=transaction_type,
+                        quantity=exit_qty,
+                        product="NRML",
+                        order_type="MARKET"
+                    )
+                    orders_placed.append({
+                        "symbol": symbol,
+                        "qty": exit_qty,
+                        "type": transaction_type,
+                        "order_id": order_id
+                    })
+            except Exception as e:
+                errors.append({"symbol": symbol, "error": str(e)})
+
+        return jsonify({
+            "success": len(errors) == 0,
+            "expiry": expiry,
+            "orders_placed": orders_placed,
+            "errors": errors,
+            "message": f"Placed {len(orders_placed)} exit orders" + (f", {len(errors)} errors" if errors else "")
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 
 @app.route("/api/settings", methods=["POST"])
