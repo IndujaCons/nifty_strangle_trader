@@ -821,7 +821,12 @@
 
         <!-- Center Panel: Monitor & Trade -->
         <div class="panel">
-            <div class="panel-header">Market Monitor</div>
+            <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Market Monitor</span>
+                <select id="expirySelector" onchange="onExpiryChange()" style="padding: 4px 8px; font-size: 0.7rem; border-radius: 4px; border: 1px solid #ddd; background: white; cursor: pointer;">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
             <div class="panel-content">
                 <div id="marketStatus" class="market-status closed">
                     <span id="marketStatusText">Market Closed</span>
@@ -973,6 +978,7 @@
                         <div class="no-positions">No trade history</div>
                     </div>
                     <div id="historySource" style="text-align: center; font-size: 0.6rem; color: #555; margin-top: 6px;"></div>
+                    <div id="historyLastUpdate" style="text-align: center; font-size: 0.6rem; color: #888; margin-top: 2px;"></div>
                 </div>
 
                 <div class="refresh-time">Auto-refresh every 1 min</div>
@@ -1030,6 +1036,42 @@
 
         // Manual profit per expiry (stored in CSV via API)
         let manualProfits = {};
+
+        // Selected expiry for market monitor
+        let selectedExpiry = null;
+
+        function loadExpiries() {
+            fetch('/api/expiries')
+                .then(res => res.json())
+                .then(data => {
+                    const selector = document.getElementById('expirySelector');
+                    if (data.expiries && data.expiries.length > 0) {
+                        selector.innerHTML = data.expiries.map((exp, idx) =>
+                            `<option value="${exp.expiry}" ${idx === 0 ? 'selected' : ''}>${exp.label}</option>`
+                        ).join('');
+                        // Set default to first expiry
+                        selectedExpiry = data.expiries[0].expiry;
+                        // Refresh market data with correct expiry
+                        refreshMarketData();
+                    } else {
+                        selector.innerHTML = '<option value="">No expiries</option>';
+                    }
+                })
+                .catch(err => {
+                    console.error('Error loading expiries:', err);
+                    document.getElementById('expirySelector').innerHTML = '<option value="">Error</option>';
+                });
+        }
+
+        function onExpiryChange() {
+            const selector = document.getElementById('expirySelector');
+            selectedExpiry = selector.value;
+            // Reset custom strikes when expiry changes
+            customStrikes = { call: null, put: null };
+            originalStrikes = { call: null, put: null };
+            // Refresh market data with new expiry
+            refreshMarketData();
+        }
 
         function switchTab(tab) {
             // Update buttons
@@ -1222,6 +1264,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             checkConnection();
             loadSettings();
+            loadExpiries();
             initManualProfit();
             startRefresh();
         });
@@ -1279,6 +1322,9 @@
                     paper_trading: !liveTrading,
                     lot_quantity: lotQuantity
                 })
+            }).then(() => {
+                // Refresh market data to update margin calculation
+                refreshMarketData();
             });
         }
 
@@ -1321,10 +1367,12 @@
             refreshInterval = setInterval(refreshMarketData, 60000);    // 1 minute
             positionInterval = setInterval(refreshPositions, 60000);    // 1 minute
             historyInterval = setInterval(refreshHistory, 60000);       // 1 minute
+            setInterval(checkConnection, 60000);                        // 1 minute - refresh available margin
         }
 
         function refreshMarketData() {
-            fetch('/api/market/data')
+            const url = selectedExpiry ? `/api/market/data?expiry=${selectedExpiry}` : '/api/market/data';
+            fetch(url)
                 .then(res => res.json())
                 .then(data => {
                     if (data.error) {
@@ -1511,6 +1559,11 @@
             if (data.source) {
                 sourceEl.textContent = `Source: ${data.source}`;
             }
+
+            // Show last update timestamp
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            document.getElementById('historyLastUpdate').textContent = `Last updated: ${timeStr}`;
 
             // Update expiry breakdown
             const container = document.getElementById('historyContainer');

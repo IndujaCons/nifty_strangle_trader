@@ -180,6 +180,55 @@ def login_token():
         return jsonify({"success": False, "error": str(e)})
 
 
+@app.route("/api/expiries")
+def get_expiries():
+    """Get available expiries for dropdown selection."""
+    global provider
+    import re
+    from datetime import date as date_class
+
+    if provider is None:
+        init_provider()
+
+    try:
+        access_token = os.getenv("KITE_ACCESS_TOKEN", "")
+        if not access_token:
+            return jsonify({"expiries": []})
+
+        provider.kite.set_access_token(access_token)
+
+        # Get expiries from open positions
+        position_expiries = []
+        try:
+            positions = provider.kite.positions()
+            net_positions = positions.get('net', [])
+            for pos in net_positions:
+                if pos['tradingsymbol'].startswith('NIFTY') and pos['quantity'] != 0:
+                    # Extract expiry from symbol like NIFTY26113 or NIFTY26JAN
+                    symbol = pos['tradingsymbol']
+                    match = re.match(r'NIFTY(\d{2})(\d|[A-Z])(\d{2})', symbol)
+                    if match:
+                        yy, m, dd = match.groups()
+                        year = 2000 + int(yy)
+                        # Month mapping
+                        month_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
+                                    '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
+                        month = month_map.get(m, int(m) if m.isdigit() else 1)
+                        try:
+                            exp_date = date_class(year, month, int(dd))
+                            if exp_date not in position_expiries:
+                                position_expiries.append(exp_date)
+                        except:
+                            pass
+        except Exception as e:
+            print(f"Error getting position expiries: {e}")
+
+        expiries = provider.get_available_expiries(count=2, position_expiries=position_expiries)
+        return jsonify({"expiries": expiries})
+    except Exception as e:
+        return jsonify({"expiries": [], "error": str(e)})
+
+
 @app.route("/api/market/data")
 def market_data():
     """Get current market data."""
@@ -204,8 +253,15 @@ def market_data():
 
         market_status = "open" if market_open <= current_time <= market_close else "closed"
 
+        # Get selected expiry from query param (if provided)
+        selected_expiry = request.args.get('expiry')
+        expiry_date = None
+        if selected_expiry:
+            from datetime import date as date_class
+            expiry_date = date_class.fromisoformat(selected_expiry)
+
         # Get strangle data
-        data = provider.find_strangle()
+        data = provider.find_strangle(expiry=expiry_date)
 
         if not data:
             return jsonify({

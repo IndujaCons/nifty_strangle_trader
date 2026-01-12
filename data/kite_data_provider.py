@@ -142,18 +142,61 @@ class KiteDataProvider:
         expiries = sorted(set(k[0] for k in options.keys()))
         return expiries
 
-    def get_target_expiry(self, target_dte: int = 14, tolerance: int = 5) -> Optional[date]:
-        """Find expiry closest to target DTE."""
+    def get_target_expiry(self, target_dte: int = 14) -> Optional[date]:
+        """
+        Find appropriate expiry for trading.
+
+        Logic: Use nearest expiry if DTE <= 14, otherwise use next expiry.
+        This ensures we don't jump to next expiry too early (e.g., at 15 DTE).
+        """
         today = date.today()
         expiries = self.get_expiries()
 
+        if not expiries:
+            return None
+
+        # Get nearest expiry
+        nearest = expiries[0]
+        nearest_dte = (nearest - today).days
+
+        # Use nearest expiry if it's <= 14 DTE
+        if nearest_dte <= target_dte:
+            return nearest
+
+        # Otherwise use next expiry if available (for fresh entries)
+        return expiries[1] if len(expiries) > 1 else nearest
+
+    def get_available_expiries(self, count: int = 2, min_dte: int = 3, position_expiries: List[date] = None) -> List[dict]:
+        """
+        Get the nearest N expiries with their DTE for dropdown selection.
+
+        Args:
+            count: Number of expiries to return
+            min_dte: Minimum DTE to include (skip very near-term expiries)
+            position_expiries: List of expiries that have open positions (always include these)
+
+        Returns: List of {expiry: date, dte: int, label: str}
+        """
+        today = date.today()
+        expiries = self.get_expiries()
+        position_expiries = position_expiries or []
+
+        result = []
         for exp in expiries:
             dte = (exp - today).days
-            if target_dte - tolerance <= dte <= target_dte + tolerance:
-                return exp
+            # Include if: has open positions OR (DTE >= min_dte AND haven't reached count yet)
+            has_positions = exp in position_expiries
+            if has_positions or (dte >= min_dte and len(result) < count):
+                result.append({
+                    'expiry': exp.isoformat(),
+                    'dte': dte,
+                    'label': f"{exp.strftime('%d-%b-%Y')} ({dte} DTE)"
+                })
+            # Stop if we have enough expiries (but always include position expiries)
+            if len(result) >= count and not any(pe not in [date.fromisoformat(r['expiry']) for r in result] for pe in position_expiries):
+                break
 
-        # Fallback to second expiry if available
-        return expiries[1] if len(expiries) > 1 else expiries[0] if expiries else None
+        return result[:count + len(position_expiries)]  # Allow extra for position expiries
 
     def get_spot_price(self) -> float:
         """Get current NIFTY spot price."""
