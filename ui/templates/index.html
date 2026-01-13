@@ -1514,7 +1514,7 @@
         }
 
         function refreshPositions() {
-            fetch('/api/positions')
+            fetch('/api/positions?_t=' + Date.now(), { cache: 'no-store' })
                 .then(res => res.json())
                 .then(data => updatePositionsDisplay(data));
         }
@@ -1642,7 +1642,7 @@
         }
 
         function refreshHistory() {
-            fetch('/api/history')
+            fetch('/api/history?_t=' + Date.now(), { cache: 'no-store' })
                 .then(res => res.json())
                 .then(data => updateHistoryDisplay(data))
                 .catch(err => console.error('History fetch error:', err));

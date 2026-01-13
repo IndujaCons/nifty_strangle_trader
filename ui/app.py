@@ -391,7 +391,11 @@ def positions():
         provider.kite.set_access_token(access_token)
         pos_data = provider.get_positions()
 
-        return jsonify(pos_data)
+        response = jsonify(pos_data)
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
 
     except Exception as e:
         return jsonify({"error": str(e), "positions": []})
@@ -560,6 +564,18 @@ def history():
             if added > 0:
                 print(f"Added {added} closed positions to history CSV")
 
+            # Fetch live quotes for open positions to calculate real-time P&L
+            open_symbols = [f"NFO:{p['tradingsymbol']}" for p in nifty_positions if p['quantity'] != 0]
+            live_quotes = {}
+            if open_symbols:
+                try:
+                    quotes = provider.kite.quote(open_symbols)
+                    for key, val in quotes.items():
+                        symbol = key.replace("NFO:", "")
+                        live_quotes[symbol] = val.get('last_price', 0)
+                except Exception as e:
+                    print(f"Error fetching live quotes: {e}")
+
             # Process live positions for current open P&L
             for pos in nifty_positions:
                 symbol = pos['tradingsymbol']
@@ -602,18 +618,27 @@ def history():
 
                 # Get P&L values
                 realised = pos.get('realised', 0)
-                unrealised = pos.get('unrealised', 0)
                 pnl = pos.get('pnl', 0)
+                quantity = pos['quantity']
 
-                if pos['quantity'] != 0:
-                    # Open position
-                    live_expiry_data[expiry_key]['open'] += unrealised
+                if quantity != 0:
+                    # Open position - calculate P&L using live quotes
+                    avg_price = pos.get('average_price', 0)
+                    current_ltp = live_quotes.get(symbol, pos.get('last_price', avg_price))
+
+                    # For short positions (qty < 0): profit = (avg - ltp) * abs(qty)
+                    # For long positions (qty > 0): profit = (ltp - avg) * qty
+                    if quantity < 0:
+                        calculated_pnl = (avg_price - current_ltp) * abs(quantity)
+                    else:
+                        calculated_pnl = (current_ltp - avg_price) * quantity
+
+                    live_expiry_data[expiry_key]['open'] += calculated_pnl
                     live_expiry_data[expiry_key]['booked'] += realised
                     live_expiry_data[expiry_key]['open_positions'] += 1
                     # Max profit for sold options = premium collected = average_price × abs(quantity)
-                    if pos['quantity'] < 0:  # Sold position
-                        avg_price = pos.get('average_price', 0)
-                        max_profit_for_position = avg_price * abs(pos['quantity'])
+                    if quantity < 0:  # Sold position
+                        max_profit_for_position = avg_price * abs(quantity)
                         live_expiry_data[expiry_key]['max_profit'] += max_profit_for_position
                 else:
                     # Closed position - add to booked
@@ -696,7 +721,7 @@ def history():
                 'exit_triggered': exit_triggered
             })
 
-    return jsonify({
+    response = jsonify({
         'booked_profit': total_booked,
         'open_pnl': total_open,
         'max_profit': total_max_profit,
@@ -706,6 +731,10 @@ def history():
         'by_expiry': by_expiry,
         'source': 'live+csv' if zerodha_connected else 'csv_only'
     })
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route("/api/history/add", methods=["POST"])

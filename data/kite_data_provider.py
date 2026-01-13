@@ -520,7 +520,7 @@ class KiteDataProvider:
 
     def get_positions(self) -> dict:
         """
-        Get current positions from Zerodha.
+        Get current positions from Zerodha with real-time P&L.
 
         Returns:
             dict with net and day positions
@@ -529,18 +529,44 @@ class KiteDataProvider:
             positions = self.kite.positions()
 
             # Filter for NIFTY options only
+            net_positions = positions.get('net', [])
+            nifty_raw = [p for p in net_positions if p['tradingsymbol'].startswith('NIFTY') and p['quantity'] != 0]
+
+            # Fetch live quotes for real-time P&L calculation
+            live_quotes = {}
+            if nifty_raw:
+                symbols = [f"NFO:{p['tradingsymbol']}" for p in nifty_raw]
+                try:
+                    quotes = self.kite.quote(symbols)
+                    for key, val in quotes.items():
+                        symbol = key.replace("NFO:", "")
+                        live_quotes[symbol] = val.get('last_price', 0)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch live quotes: {e}")
+
             nifty_positions = []
-            for pos in positions.get('net', []):
-                if pos['tradingsymbol'].startswith('NIFTY') and pos['quantity'] != 0:
-                    nifty_positions.append({
-                        'symbol': pos['tradingsymbol'],
-                        'quantity': pos['quantity'],
-                        'average_price': pos['average_price'],
-                        'ltp': pos['last_price'],
-                        'pnl': pos['pnl'],
-                        'unrealised': pos.get('unrealised', 0),
-                        'realised': pos.get('realised', 0),
-                    })
+            for pos in nifty_raw:
+                symbol = pos['tradingsymbol']
+                quantity = pos['quantity']
+                avg_price = pos['average_price']
+                # Use live quote if available, else fall back to position's last_price
+                current_ltp = live_quotes.get(symbol, pos['last_price'])
+
+                # Calculate real-time P&L
+                if quantity < 0:  # Short position
+                    calculated_pnl = (avg_price - current_ltp) * abs(quantity)
+                else:  # Long position
+                    calculated_pnl = (current_ltp - avg_price) * quantity
+
+                nifty_positions.append({
+                    'symbol': symbol,
+                    'quantity': quantity,
+                    'average_price': avg_price,
+                    'ltp': current_ltp,
+                    'pnl': calculated_pnl,
+                    'unrealised': calculated_pnl,
+                    'realised': pos.get('realised', 0),
+                })
 
             total_pnl = sum(p['pnl'] for p in nifty_positions)
 
