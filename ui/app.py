@@ -7,14 +7,13 @@ Open: http://localhost:5000
 """
 import sys
 import os
-import threading
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask, render_template, jsonify, request, redirect
+from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv, set_key
 from pathlib import Path
 
@@ -22,7 +21,7 @@ from data.kite_data_provider import KiteDataProvider
 from data.trade_history import get_history_manager
 from data.pcr_history import get_pcr_manager
 from core.signal_tracker import SignalTracker
-from config.settings import NIFTY_CONFIG, MARKET_CONFIG, TRADING_WINDOWS, STRATEGY_CONFIG
+from config.settings import NIFTY_CONFIG, MARKET_CONFIG, STRATEGY_CONFIG
 
 app = Flask(__name__)
 
@@ -32,10 +31,7 @@ load_dotenv(ENV_FILE)
 
 provider = None
 tracker = SignalTracker()
-monitor_thread = None
-monitor_running = False
 last_data = {}
-trade_pending = None
 
 # PCR cache
 pcr_cache = {"pcr": None, "timestamp": 0, "max_pain": None}
@@ -72,9 +68,8 @@ def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
         instruments = kite_provider.kite.instruments("NFO")
 
         # Ensure expiry_date is a date object for comparison
-        from datetime import date as date_class
         if isinstance(expiry_date, str):
-            expiry_date = date_class.fromisoformat(expiry_date)
+            expiry_date = date.fromisoformat(expiry_date)
 
         nifty_options = []
         for i in instruments:
@@ -301,7 +296,6 @@ def get_expiries():
     """Get available expiries for dropdown selection."""
     global provider
     import re
-    from datetime import date as date_class
 
     if provider is None:
         init_provider()
@@ -331,7 +325,7 @@ def get_expiries():
                                     '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
                         month = month_map.get(m, int(m) if m.isdigit() else 1)
                         try:
-                            exp_date = date_class(year, month, int(dd))
+                            exp_date = date(year, month, int(dd))
                             if exp_date not in position_expiries:
                                 position_expiries.append(exp_date)
                         except:
@@ -421,8 +415,7 @@ def market_data():
         selected_expiry = request.args.get('expiry')
         expiry_date = None
         if selected_expiry:
-            from datetime import date as date_class
-            expiry_date = date_class.fromisoformat(selected_expiry)
+            expiry_date = date.fromisoformat(selected_expiry)
 
         # Get strangle data
         data = provider.find_strangle(expiry=expiry_date)
@@ -655,7 +648,6 @@ def option_quote():
             return jsonify({"error": "Missing strike or expiry"})
 
         # Get the option quote
-        from datetime import date as date_type
         expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date()
 
         # Get trading symbol using provider method
