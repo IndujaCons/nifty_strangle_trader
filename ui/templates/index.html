@@ -1404,6 +1404,7 @@
             document.getElementById('totalQty').textContent = lotQuantity * lotSize;
             document.getElementById('lotsDisplay').textContent = lotQuantity;
 
+            // Save settings first
             fetch('/api/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1412,8 +1413,29 @@
                     lot_quantity: lotQuantity
                 })
             }).then(() => {
-                // Refresh market data to update margin calculation
-                refreshMarketData();
+                // Fetch updated margin without resetting signal timer
+                const url = selectedExpiry
+                    ? `/api/market/data?expiry=${selectedExpiry}&skip_signal=true`
+                    : '/api/market/data?skip_signal=true';
+
+                return fetch(url);
+            }).then(res => res.json())
+            .then(data => {
+                if (data.error) return;
+
+                // Update margin and premium displays
+                document.getElementById('marginRequired').textContent =
+                    data.margin_required?.toLocaleString('en-IN', {maximumFractionDigits: 0}) || '--';
+                document.getElementById('totalPremium').textContent =
+                    data.total_premium_all_lots?.toLocaleString('en-IN', {maximumFractionDigits: 2}) || '--';
+
+                // Update lastMarketData with new values (preserving signal state)
+                if (lastMarketData) {
+                    lastMarketData.lots = data.lots;
+                    lastMarketData.total_qty = data.total_qty;
+                    lastMarketData.total_premium_all_lots = data.total_premium_all_lots;
+                    lastMarketData.margin_required = data.margin_required;
+                }
             });
         }
 

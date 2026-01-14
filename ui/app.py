@@ -22,7 +22,7 @@ from data.kite_data_provider import KiteDataProvider
 from data.trade_history import get_history_manager
 from data.pcr_history import get_pcr_manager
 from core.signal_tracker import SignalTracker
-from config.settings import NIFTY_CONFIG, MARKET_CONFIG, TRADING_WINDOWS
+from config.settings import NIFTY_CONFIG, MARKET_CONFIG, TRADING_WINDOWS, STRATEGY_CONFIG
 
 app = Flask(__name__)
 
@@ -433,8 +433,29 @@ def market_data():
                 "error": "Could not fetch strangle data"
             })
 
-        # Update signal tracker
-        signal_info = tracker.update_signal(data.straddle_price, data.straddle_vwap)
+        # Update signal tracker (skip if requested - e.g., when only updating margin)
+        skip_signal = request.args.get('skip_signal', 'false').lower() == 'true'
+        if skip_signal:
+            # Return current signal state without updating
+            signal_info = {
+                "signal_active": tracker.signal_state.is_active,
+                "duration_seconds": (datetime.now() - tracker.signal_state.signal_start).total_seconds() if tracker.signal_state.signal_start else 0,
+                "required_seconds": STRATEGY_CONFIG["signal_duration_seconds"],
+                "current_window": tracker._get_current_window(datetime.now()),
+                "can_trade": tracker._get_current_window(datetime.now()) is not None and tracker._can_trade_in_window(tracker._get_current_window(datetime.now()) or ""),
+                "entry_ready": False,  # Will be recalculated below
+                "morning_trades": tracker.window_state.morning_trades,
+                "afternoon_trades": tracker.window_state.afternoon_trades,
+            }
+            # Recalculate entry_ready
+            required_duration = STRATEGY_CONFIG["signal_duration_seconds"]
+            signal_info["entry_ready"] = (
+                signal_info["signal_active"] and
+                signal_info["duration_seconds"] >= required_duration and
+                signal_info["can_trade"]
+            )
+        else:
+            signal_info = tracker.update_signal(data.straddle_price, data.straddle_vwap)
 
         config = get_config()
         total_qty = config["lot_size"] * config["lot_quantity"]
