@@ -331,8 +331,10 @@ class KiteDataProvider:
         spot = self.get_spot_price()
         atm_strike = get_atm_strike(spot)
 
-        # Get strikes around ATM
-        strikes = [atm_strike + (i * 50) for i in range(-15, 16)]
+        # Get strikes around ATM - wider range for longer DTE
+        # For 7 DTE: ~750 pts OTM, for 14 DTE: ~1500 pts OTM
+        strike_range = max(20, dte * 2)  # More strikes for longer DTE
+        strikes = [atm_strike + (i * 50) for i in range(-strike_range, strike_range + 1)]
         quotes = self.get_option_quotes(expiry, strikes)
 
         if atm_strike not in quotes:

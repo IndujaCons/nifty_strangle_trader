@@ -9,6 +9,7 @@ import sys
 import os
 import threading
 import time
+import requests
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,6 +20,7 @@ from pathlib import Path
 
 from data.kite_data_provider import KiteDataProvider
 from data.trade_history import get_history_manager
+from data.pcr_history import get_pcr_manager
 from core.signal_tracker import SignalTracker
 from config.settings import NIFTY_CONFIG, MARKET_CONFIG, TRADING_WINDOWS
 
@@ -34,6 +36,120 @@ monitor_thread = None
 monitor_running = False
 last_data = {}
 trade_pending = None
+
+# PCR cache
+pcr_cache = {"pcr": None, "timestamp": 0, "max_pain": None}
+
+
+def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
+    """Fetch PCR and max pain from Zerodha option chain."""
+    global pcr_cache
+
+    # Return cached value if less than 1 minute old
+    if time.time() - pcr_cache["timestamp"] < 60 and pcr_cache["pcr"] is not None:
+        return pcr_cache
+
+    try:
+        if kite_provider is None:
+            return pcr_cache
+
+        # Get spot price for ATM calculation
+        spot_quote = kite_provider.kite.quote(["NSE:NIFTY 50"])
+        spot = spot_quote.get("NSE:NIFTY 50", {}).get("last_price", 0)
+        if spot == 0:
+            return pcr_cache
+
+        atm_strike = round(spot / 50) * 50
+
+        # Get expiry if not provided
+        if expiry_date is None:
+            expiry_date = kite_provider.get_target_expiry()
+
+        if expiry_date is None:
+            return pcr_cache
+
+        # Get instruments for this expiry
+        instruments = kite_provider.kite.instruments("NFO")
+
+        # Ensure expiry_date is a date object for comparison
+        from datetime import date as date_class
+        if isinstance(expiry_date, str):
+            expiry_date = date_class.fromisoformat(expiry_date)
+
+        nifty_options = []
+        for i in instruments:
+            if i['name'] != 'NIFTY':
+                continue
+            if i['instrument_type'] not in ['CE', 'PE']:
+                continue
+            # Handle both datetime and date expiry formats from Kite
+            inst_expiry = i['expiry'].date() if hasattr(i['expiry'], 'date') else i['expiry']
+            if inst_expiry == expiry_date:
+                nifty_options.append(i)
+
+        if not nifty_options:
+            print(f"PCR: No options found for expiry {expiry_date}")
+            return pcr_cache
+
+        # Filter strikes around ATM (+/- 1500 points = 30 strikes each side)
+        strike_range = 1500
+        relevant_options = [
+            i for i in nifty_options
+            if atm_strike - strike_range <= i['strike'] <= atm_strike + strike_range
+        ]
+
+        # Build symbols for quote request (max 500 at a time)
+        symbols = [f"NFO:{i['tradingsymbol']}" for i in relevant_options]
+
+        # Fetch quotes in batches if needed
+        all_quotes = {}
+        batch_size = 200
+        for i in range(0, len(symbols), batch_size):
+            batch = symbols[i:i + batch_size]
+            quotes = kite_provider.kite.quote(batch)
+            all_quotes.update(quotes)
+
+        # Calculate OI totals
+        total_ce_oi = 0
+        total_pe_oi = 0
+        strike_oi = {}
+
+        for opt in relevant_options:
+            symbol = f"NFO:{opt['tradingsymbol']}"
+            quote = all_quotes.get(symbol, {})
+            oi = quote.get('oi', 0)
+            strike = opt['strike']
+
+            if opt['instrument_type'] == 'CE':
+                total_ce_oi += oi
+            else:
+                total_pe_oi += oi
+
+            # Accumulate OI per strike for max pain
+            if strike not in strike_oi:
+                strike_oi[strike] = 0
+            strike_oi[strike] += oi
+
+        # Calculate PCR
+        pcr = round(total_pe_oi / total_ce_oi, 2) if total_ce_oi > 0 else 0
+
+        # Calculate max pain (strike with highest total OI)
+        max_pain = max(strike_oi, key=strike_oi.get) if strike_oi else 0
+
+        pcr_cache = {
+            "pcr": pcr,
+            "max_pain": max_pain,
+            "ce_oi": total_ce_oi,
+            "pe_oi": total_pe_oi,
+            "timestamp": time.time()
+        }
+        print(f"PCR: {pcr}, Max Pain: {max_pain}, CE OI: {total_ce_oi:,}, PE OI: {total_pe_oi:,}")
+        return pcr_cache
+
+    except Exception as e:
+        print(f"Error fetching PCR from Zerodha: {e}")
+
+    return pcr_cache
 
 
 def get_config():
@@ -248,10 +364,58 @@ def market_data():
         # Check market hours
         now = datetime.now()
         current_time = now.time()
+        premarket_open = datetime.strptime("09:00", "%H:%M").time()
         market_open = datetime.strptime(MARKET_CONFIG["market_open"], "%H:%M").time()
         market_close = datetime.strptime(MARKET_CONFIG["market_close"], "%H:%M").time()
 
-        market_status = "open" if market_open <= current_time <= market_close else "closed"
+        # Determine market status
+        if market_open <= current_time <= market_close:
+            market_status = "open"
+        elif premarket_open <= current_time < market_open:
+            market_status = "pre-market"
+        else:
+            market_status = "closed"
+
+        # Pre-market: Only fetch spot price, keep other fields blank
+        if market_status == "pre-market":
+            try:
+                spot = provider.get_spot_price()
+                return jsonify({
+                    "timestamp": now.strftime("%H:%M:%S"),
+                    "market_status": market_status,
+                    "spot": spot,
+                    "synthetic_futures": None,
+                    "atm_strike": None,
+                    "straddle_price": None,
+                    "straddle_vwap": None,
+                    "vwap_diff": None,
+                    "expiry": None,
+                    "dte": None,
+                    "call": None,
+                    "put": None,
+                    "total_premium": None,
+                    "per_lot": None,
+                    "width": None,
+                    "lots": None,
+                    "total_qty": None,
+                    "total_premium_all_lots": None,
+                    "margin_required": None,
+                    "pcr": None,
+                    "max_pain": None,
+                    "sip_alert": False,
+                    "signal": {
+                        "active": False,
+                        "duration": 0,
+                        "required": 300,
+                        "entry_ready": False,
+                        "current_window": "pre-market",
+                        "can_trade": False,
+                        "morning_trades": 0,
+                        "afternoon_trades": 0,
+                    }
+                })
+            except Exception as e:
+                return jsonify({"market_status": market_status, "error": str(e)})
 
         # Get selected expiry from query param (if provided)
         selected_expiry = request.args.get('expiry')
@@ -327,6 +491,33 @@ def market_data():
         except Exception as e:
             print(f"Margin calculation error: {e}")
 
+        # Fetch PCR from Zerodha
+        pcr_data = fetch_pcr_from_zerodha(provider, data.expiry)
+        pcr_value = pcr_data.get("pcr")
+
+        # PCR History Manager - SIP alert and auto-save
+        pcr_manager = get_pcr_manager()
+        current_time_str = now.strftime("%H:%M")
+
+        # Check if SIP alert should be shown (12:30-12:55 PM, PCR < 0.7)
+        sip_alert = False
+        if pcr_value is not None and pcr_manager.should_show_sip_alert(pcr_value, threshold=0.7):
+            sip_alert = True
+
+        # Auto-save PCR at 3:25 PM (before market close)
+        if "15:20" <= current_time_str <= "15:30":
+            if pcr_value is not None and pcr_data.get("max_pain"):
+                saved = pcr_manager.save_pcr(
+                    pcr=pcr_value,
+                    max_pain=pcr_data.get("max_pain", 0),
+                    ce_oi=pcr_data.get("ce_oi", 0),
+                    pe_oi=pcr_data.get("pe_oi", 0),
+                    spot=data.spot,
+                    expiry=data.expiry
+                )
+                if saved:
+                    print(f"PCR saved to history: {pcr_value}")
+
         last_data = {
             "timestamp": now.strftime("%H:%M:%S"),
             "market_status": market_status,
@@ -357,6 +548,9 @@ def market_data():
             "total_qty": total_qty,
             "total_premium_all_lots": total_premium,
             "margin_required": total_margin,
+            "pcr": pcr_value,
+            "max_pain": pcr_data.get("max_pain"),
+            "sip_alert": sip_alert,
             "signal": {
                 "active": signal_info["signal_active"],
                 "duration": signal_info["duration_seconds"],
@@ -373,6 +567,22 @@ def market_data():
 
     except Exception as e:
         return jsonify({"error": str(e)})
+
+
+@app.route("/api/sip-alert/dismiss", methods=["POST"])
+def dismiss_sip_alert():
+    """Mark SIP alert as shown for today."""
+    pcr_manager = get_pcr_manager()
+    pcr_manager.mark_alert_shown()
+    return jsonify({"success": True})
+
+
+@app.route("/api/pcr/history")
+def pcr_history():
+    """Get PCR history."""
+    pcr_manager = get_pcr_manager()
+    history = pcr_manager.get_history(days=30)
+    return jsonify({"history": history})
 
 
 @app.route("/api/positions")

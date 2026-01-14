@@ -303,6 +303,11 @@
             border-color: #e6c8c8;
         }
 
+        .market-status.premarket {
+            background: #fff8e1;
+            border-color: #ffe082;
+        }
+
         .data-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -713,6 +718,55 @@
             gap: 8px;
         }
 
+        /* SIP Alert Modal */
+        .sip-alert-content {
+            background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+            border: 2px solid #ff9800;
+            text-align: center;
+        }
+
+        .sip-alert-content h3 {
+            color: #e65100;
+            font-size: 1.3rem;
+            margin-bottom: 16px;
+        }
+
+        .sip-alert-content .pcr-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #d84315;
+            margin: 12px 0;
+        }
+
+        .sip-alert-content p {
+            color: #5d4037;
+            margin: 8px 0;
+            font-size: 0.9rem;
+        }
+
+        .sip-alert-content .deadline {
+            background: #ffcc80;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin: 16px 0;
+        }
+
+        .sip-alert-content button {
+            background: #ff9800;
+            color: white;
+            border: none;
+            padding: 10px 32px;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-top: 12px;
+        }
+
+        .sip-alert-content button:hover {
+            background: #f57c00;
+        }
+
         .modal-footer .btn {
             flex: 1;
         }
@@ -852,6 +906,14 @@
                     <div class="data-card full">
                         <label>Straddle vs VWAP</label>
                         <div class="value" id="vwapDiff">--</div>
+                    </div>
+                    <div class="data-card">
+                        <label>PCR (OI)</label>
+                        <div class="value" id="pcrValue">--</div>
+                    </div>
+                    <div class="data-card">
+                        <label>Max Pain</label>
+                        <div class="value" id="maxPainValue">--</div>
                     </div>
                 </div>
 
@@ -1018,11 +1080,24 @@
         </div>
     </div>
 
+    <!-- SIP Alert Modal -->
+    <div class="modal" id="sipAlertModal">
+        <div class="modal-content sip-alert-content">
+            <h3>SIP Opportunity!</h3>
+            <p>Put-Call Ratio is low</p>
+            <div class="pcr-value">PCR = <span id="sipPcrValue">0.00</span></div>
+            <p>Market sentiment is bearish - this could be a good time for SIP investment!</p>
+            <div class="deadline">Act before 2 PM for same-day NAV</div>
+            <button onclick="dismissSipAlert()">Got it!</button>
+        </div>
+    </div>
+
     <script>
         let refreshInterval;
         let positionInterval;
         let historyInterval;
         let lastMarketData = null;
+        let sipAlertShownToday = false;
 
         // Track custom strike adjustments
         let customStrikes = {
@@ -1232,6 +1307,8 @@
                     document.getElementById('atmStrike').textContent = marketData.atm_strike?.toLocaleString('en-IN') || '--';
                     document.getElementById('straddlePrice').textContent = marketData.straddle_price?.toFixed(2) || '--';
                     document.getElementById('straddleVwap').textContent = marketData.straddle_vwap?.toFixed(2) || '--';
+                    document.getElementById('pcrValue').textContent = marketData.pcr?.toFixed(2) || '--';
+                    document.getElementById('maxPainValue').textContent = marketData.max_pain?.toLocaleString('en-IN') || '--';
                     document.getElementById('lastUpdate').textContent = marketData.timestamp;
 
                     if (marketData.call) {
@@ -1269,6 +1346,8 @@
             startRefresh();
         });
 
+        let wasConnected = false;  // Track connection state for initial refresh
+
         function checkConnection() {
             fetch('/api/connection/status')
                 .then(res => res.json())
@@ -1286,11 +1365,21 @@
                             '₹' + (data.available_margin?.toLocaleString('en-IN', {maximumFractionDigits: 0}) || '--');
                         userInfo.style.display = 'block';
                         loginForm.style.display = 'none';
+
+                        // Trigger immediate refresh on first connection
+                        if (!wasConnected) {
+                            wasConnected = true;
+                            console.log('Connected - triggering immediate refresh');
+                            refreshMarketData();
+                            refreshPositions();
+                            refreshHistory();
+                        }
                     } else {
                         dot.classList.remove('connected');
                         text.textContent = 'Disconnected';
                         userInfo.style.display = 'none';
                         loginForm.style.display = 'block';
+                        wasConnected = false;  // Reset so next connection triggers refresh
                     }
                 });
         }
@@ -1385,12 +1474,14 @@
                     // Market status
                     const statusEl = document.getElementById('marketStatus');
                     const statusText = document.getElementById('marketStatusText');
+                    statusEl.classList.remove('open', 'closed', 'premarket');
                     if (data.market_status === 'open') {
-                        statusEl.classList.remove('closed');
                         statusEl.classList.add('open');
                         statusText.textContent = 'Market Open';
+                    } else if (data.market_status === 'pre-market') {
+                        statusEl.classList.add('premarket');
+                        statusText.textContent = 'Pre-Market (9:00-9:15)';
                     } else {
-                        statusEl.classList.remove('open');
                         statusEl.classList.add('closed');
                         statusText.textContent = 'Market Closed';
                     }
@@ -1406,6 +1497,24 @@
                         const sign = data.vwap_diff >= 0 ? '+' : '';
                         diffEl.textContent = sign + data.vwap_diff.toFixed(2);
                         diffEl.className = 'value ' + (data.vwap_diff >= 0 ? 'positive' : 'negative');
+                    }
+
+                    // PCR and Max Pain
+                    const pcrEl = document.getElementById('pcrValue');
+                    if (data.pcr !== null && data.pcr !== undefined) {
+                        pcrEl.textContent = data.pcr.toFixed(2);
+                        // Color based on PCR: > 1 = bullish (green), < 1 = bearish (red)
+                        pcrEl.className = 'value ' + (data.pcr >= 1 ? 'positive' : 'negative');
+                    } else {
+                        pcrEl.textContent = '--';
+                    }
+                    document.getElementById('maxPainValue').textContent = data.max_pain?.toLocaleString('en-IN') || '--';
+
+                    // SIP Alert - show popup if triggered
+                    if (data.sip_alert && !sipAlertShownToday) {
+                        document.getElementById('sipPcrValue').textContent = data.pcr?.toFixed(2) || '0.00';
+                        document.getElementById('sipAlertModal').classList.add('show');
+                        sipAlertShownToday = true;
                     }
 
                     // Signal
@@ -1792,6 +1901,14 @@
 
         function closeModal() {
             document.getElementById('tradeModal').classList.remove('show');
+        }
+
+        function dismissSipAlert() {
+            document.getElementById('sipAlertModal').classList.remove('show');
+            sipAlertShownToday = true;
+            // Notify backend
+            fetch('/api/sip-alert/dismiss', { method: 'POST' })
+                .catch(err => console.error('Error dismissing SIP alert:', err));
         }
 
         function executeTrade() {
