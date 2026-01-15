@@ -48,6 +48,7 @@ STRATEGY_CONFIG = {
 
     # Exit Rules
     "profit_target_pct": 0.50,   # Exit at 50% of max profit
+    "move_decay_threshold": float(os.getenv("MOVE_DECAY_THRESHOLD", "0.60")),  # Move position when decayed > 60%
 
     # Entry Condition
     "entry_signal": "straddle_gt_vwap",  # Enter when straddle > VWAP

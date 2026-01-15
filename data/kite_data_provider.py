@@ -560,6 +560,14 @@ class KiteDataProvider:
                 else:  # Long position
                     calculated_pnl = (current_ltp - avg_price) * quantity
 
+                # Calculate decay percentage for short positions
+                # Decay = how much premium has eroded from entry price
+                decay_pct = 0.0
+                if quantity < 0 and avg_price > 0:  # Short position
+                    decay_pct = (avg_price - current_ltp) / avg_price
+                elif quantity > 0 and avg_price > 0:  # Long position (loss = decay)
+                    decay_pct = (avg_price - current_ltp) / avg_price
+
                 nifty_positions.append({
                     'symbol': symbol,
                     'quantity': quantity,
@@ -568,6 +576,7 @@ class KiteDataProvider:
                     'pnl': calculated_pnl,
                     'unrealised': calculated_pnl,
                     'realised': pos.get('realised', 0),
+                    'decay_pct': round(decay_pct * 100, 1),  # As percentage
                 })
 
             total_pnl = sum(p['pnl'] for p in nifty_positions)

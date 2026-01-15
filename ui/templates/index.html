@@ -83,7 +83,7 @@
 
         .container {
             display: grid;
-            grid-template-columns: 220px 1fr 280px;
+            grid-template-columns: 220px 3fr 2fr;
             gap: 10px;
             padding: 10px;
             height: calc(100vh - 42px);
@@ -445,6 +445,52 @@
             font-size: 0.8rem;
         }
 
+        /* Move Modal */
+        .move-details {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .move-section {
+            flex: 1;
+            background: #fafafa;
+            border-radius: 4px;
+            padding: 10px;
+            border: 1px solid #eee;
+        }
+
+        .move-section-header {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .move-section-header.negative {
+            color: #d32f2f;
+        }
+
+        .move-section-header.positive {
+            color: #2e7d32;
+        }
+
+        .move-arrow {
+            font-size: 1.5rem;
+            color: #888;
+            font-weight: bold;
+        }
+
+        .move-summary {
+            background: #f5f5f5;
+            border-radius: 4px;
+            padding: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
         /* Positions Panel */
         .position-card {
             background: #fafafa;
@@ -482,9 +528,38 @@
 
         .position-details {
             display: flex;
-            justify-content: space-between;
+            align-items: center;
             font-size: 0.6rem;
             color: #999;
+            gap: 15px;
+        }
+
+        .decay-inline {
+            font-size: 0.65rem;
+            opacity: 0.8;
+        }
+
+        .move-btn {
+            font-size: 0.6rem;
+            padding: 2px 8px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            background: #f5f5f5;
+            color: #999;
+            cursor: not-allowed;
+            font-family: inherit;
+            margin-left: auto;
+        }
+
+        .move-btn.enabled {
+            background: #fff3e0;
+            border-color: #ff9800;
+            color: #e65100;
+            cursor: pointer;
+        }
+
+        .move-btn.enabled:hover {
+            background: #ffe0b2;
         }
 
         .total-pnl {
@@ -869,6 +944,11 @@
                         <label>Total Qty</label>
                         <span id="totalQty">390</span>
                     </div>
+
+                    <div class="setting-row">
+                        <label>Move Decay %</label>
+                        <input type="number" id="decayThreshold" min="10" max="90" value="60" onchange="updateSettings()" style="width: 50px;">
+                    </div>
                 </div>
             </div>
         </div>
@@ -1092,12 +1172,69 @@
         </div>
     </div>
 
+    <!-- Move Position Modal -->
+    <div class="modal" id="moveModal">
+        <div class="modal-content">
+            <div class="modal-header">Move Position to 7-Delta</div>
+            <div class="modal-body">
+                <div class="move-details">
+                    <div class="move-section">
+                        <div class="move-section-header negative">SQUARE OFF (BUY)</div>
+                        <div class="strangle-row">
+                            <span class="label">Strike</span>
+                            <span class="value" id="moveOldStrike">--</span>
+                        </div>
+                        <div class="strangle-row">
+                            <span class="label">LTP</span>
+                            <span class="value" id="moveOldLtp">--</span>
+                        </div>
+                        <div class="strangle-row">
+                            <span class="label">Quantity</span>
+                            <span class="value" id="moveOldQty">--</span>
+                        </div>
+                    </div>
+                    <div class="move-arrow">→</div>
+                    <div class="move-section">
+                        <div class="move-section-header positive">NEW SELL</div>
+                        <div class="strangle-row">
+                            <span class="label">Strike</span>
+                            <span class="value" id="moveNewStrike">--</span>
+                        </div>
+                        <div class="strangle-row">
+                            <span class="label">LTP</span>
+                            <span class="value" id="moveNewLtp">--</span>
+                        </div>
+                        <div class="strangle-row">
+                            <span class="label">Delta</span>
+                            <span class="value" id="moveNewDelta">--</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="move-summary">
+                    <div class="strangle-row">
+                        <span class="label">Expiry</span>
+                        <span class="value" id="moveExpiry">--</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Option Type</span>
+                        <span class="value" id="moveOptionType">--</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeMoveModal()">Cancel</button>
+                <button class="btn btn-success" id="confirmMoveBtn" onclick="executeMove()">Confirm Move</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let refreshInterval;
         let positionInterval;
         let historyInterval;
         let lastMarketData = null;
         let sipAlertShownToday = false;
+        let pendingMoveSymbol = null;  // Symbol being moved
 
         // Track custom strike adjustments
         let customStrikes = {
@@ -1393,6 +1530,7 @@
                     document.getElementById('lotSize').textContent = data.lot_size;
                     document.getElementById('totalQty').textContent = data.lot_quantity * data.lot_size;
                     document.getElementById('lotsDisplay').textContent = data.lot_quantity;
+                    document.getElementById('decayThreshold').value = data.decay_threshold || 60;
                 });
         }
 
@@ -1400,6 +1538,7 @@
             const liveTrading = document.getElementById('liveTrading').checked;
             const lotQuantity = parseInt(document.getElementById('lotQuantity').value);
             const lotSize = parseInt(document.getElementById('lotSize').textContent);
+            const decayThreshold = parseInt(document.getElementById('decayThreshold').value);
 
             document.getElementById('totalQty').textContent = lotQuantity * lotSize;
             document.getElementById('lotsDisplay').textContent = lotQuantity;
@@ -1410,7 +1549,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     paper_trading: !liveTrading,
-                    lot_quantity: lotQuantity
+                    lot_quantity: lotQuantity,
+                    decay_threshold: decayThreshold
                 })
             }).then(() => {
                 // Fetch updated margin without resetting signal timer
@@ -1606,6 +1746,27 @@
                 });
         }
 
+        function decodeSymbol(symbol) {
+            // Decode NIFTY2612025000PE to "NIFTY 20-Jan 25000 PE"
+            const match = symbol.match(/^NIFTY(\d{2})([A-Z0-9])(\d{2})(\d+)(CE|PE)$/);
+            if (!match) return symbol;
+
+            const yy = match[1];
+            const monthChar = match[2];
+            const dd = match[3];
+            const strike = match[4];
+            const optType = match[5];
+
+            const monthMap = {
+                '1': 'Jan', '2': 'Feb', '3': 'Mar', '4': 'Apr',
+                '5': 'May', '6': 'Jun', '7': 'Jul', '8': 'Aug',
+                '9': 'Sep', 'O': 'Oct', 'N': 'Nov', 'D': 'Dec'
+            };
+            const month = monthMap[monthChar] || monthChar;
+
+            return `NIFTY ${parseInt(dd)}-${month} ${strike} ${optType}`;
+        }
+
         function updatePositionsDisplay(data) {
             const container = document.getElementById('positionsContainer');
             const totalPnl = document.getElementById('totalPnl');
@@ -1617,20 +1778,32 @@
                 return;
             }
 
+            const decayThreshold = parseInt(document.getElementById('decayThreshold').value) || 60;
+
             let html = '';
             data.positions.forEach(pos => {
                 const pnlClass = pos.pnl >= 0 ? 'positive' : 'negative';
                 const pnlSign = pos.pnl >= 0 ? '+' : '';
+                const decayPct = pos.decay_pct || 0;
+                const decaySign = decayPct >= 0 ? '-' : '+';
+                const isShort = pos.quantity < 0;
+                // Enable Move button only for short positions with decay > threshold
+                const canMove = isShort && decayPct >= decayThreshold;
+                const moveButtonClass = canMove ? 'move-btn enabled' : 'move-btn';
+                const moveButtonDisabled = canMove ? '' : 'disabled';
+                const displaySymbol = decodeSymbol(pos.symbol);
+
                 html += `
                     <div class="position-card">
                         <div class="position-header">
-                            <span class="position-symbol">${pos.symbol}</span>
-                            <span class="position-pnl ${pnlClass}">${pnlSign}₹${pos.pnl.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
+                            <span class="position-symbol">${displaySymbol}</span>
+                            <span class="position-pnl ${pnlClass}">${pnlSign}₹${pos.pnl.toLocaleString('en-IN', {maximumFractionDigits: 2})} <span class="decay-inline">(${decaySign}${Math.abs(decayPct).toFixed(0)}%)</span></span>
                         </div>
                         <div class="position-details">
                             <span>Qty: ${pos.quantity}</span>
                             <span>Avg: ₹${pos.average_price.toFixed(2)}</span>
                             <span>LTP: ₹${pos.ltp.toFixed(2)}</span>
+                            <button class="${moveButtonClass}" ${moveButtonDisabled} onclick="movePosition('${pos.symbol}')">Move</button>
                         </div>
                     </div>
                 `;
@@ -1931,6 +2104,86 @@
             // Notify backend
             fetch('/api/sip-alert/dismiss', { method: 'POST' })
                 .catch(err => console.error('Error dismissing SIP alert:', err));
+        }
+
+        function movePosition(symbol) {
+            // Fetch preview data first
+            fetch('/api/position/move/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol: symbol })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success) {
+                    alert('Cannot preview move: ' + data.error);
+                    return;
+                }
+
+                // Store symbol for later execution
+                pendingMoveSymbol = symbol;
+
+                // Populate modal
+                document.getElementById('moveOldStrike').textContent = data.current.strike + ' ' + data.current.option_type;
+                document.getElementById('moveOldLtp').textContent = '₹' + data.current.ltp.toFixed(2);
+                document.getElementById('moveOldQty').textContent = Math.abs(data.current.quantity);
+
+                document.getElementById('moveNewStrike').textContent = data.new.strike + ' ' + data.new.option_type;
+                document.getElementById('moveNewLtp').textContent = '₹' + data.new.ltp.toFixed(2);
+                document.getElementById('moveNewDelta').textContent = data.new.delta;
+
+                document.getElementById('moveExpiry').textContent = data.expiry;
+                document.getElementById('moveOptionType').textContent = data.current.option_type;
+
+                // Show modal
+                document.getElementById('moveModal').classList.add('show');
+            })
+            .catch(err => {
+                alert('Error fetching move preview: ' + err);
+            });
+        }
+
+        function closeMoveModal() {
+            document.getElementById('moveModal').classList.remove('show');
+            pendingMoveSymbol = null;
+        }
+
+        function executeMove() {
+            if (!pendingMoveSymbol) {
+                alert('No position selected for move');
+                return;
+            }
+
+            const btn = document.getElementById('confirmMoveBtn');
+            btn.disabled = true;
+            btn.textContent = 'Moving...';
+
+            fetch('/api/position/move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol: pendingMoveSymbol })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    closeMoveModal();
+                    const msg = data.paper_trading
+                        ? `[PAPER TRADE] Position moved!\n\n${data.old_strike} → ${data.new_strike}\nDelta: ${data.new_delta}\nQty: ${data.quantity}`
+                        : `Position moved successfully!\n\n${data.old_strike} → ${data.new_strike}\nDelta: ${data.new_delta}`;
+                    alert(msg);
+                    refreshPositions();
+                    refreshHistory();
+                } else {
+                    alert('Move failed: ' + data.error);
+                }
+                btn.disabled = false;
+                btn.textContent = 'Confirm Move';
+            })
+            .catch(err => {
+                alert('Move error: ' + err);
+                btn.disabled = false;
+                btn.textContent = 'Confirm Move';
+            });
         }
 
         function executeTrade() {

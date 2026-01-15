@@ -155,6 +155,7 @@ def get_config():
         "paper_trading": os.getenv("PAPER_TRADING", "true").lower() == "true",
         "lot_quantity": int(os.getenv("LOT_QUANTITY", "1")),
         "lot_size": NIFTY_CONFIG["lot_size"],
+        "decay_threshold": int(float(os.getenv("MOVE_DECAY_THRESHOLD", "0.60")) * 100),  # As percentage
     }
 
 
@@ -1037,6 +1038,301 @@ def set_manual_profit():
     return jsonify({"success": success})
 
 
+@app.route("/api/position/move/preview", methods=["POST"])
+def move_position_preview():
+    """
+    Preview move operation - get details of what will happen without executing.
+    """
+    global provider
+    import re
+
+    data = request.json
+    symbol = data.get("symbol")
+
+    if not symbol:
+        return jsonify({"success": False, "error": "Symbol required"})
+
+    if provider is None:
+        init_provider()
+
+    try:
+        access_token = os.getenv("KITE_ACCESS_TOKEN", "")
+        if not access_token:
+            return jsonify({"success": False, "error": "Not logged in"})
+
+        provider.kite.set_access_token(access_token)
+
+        # Get current position details
+        positions = provider.kite.positions()
+        net_positions = positions.get('net', [])
+
+        target_pos = None
+        for pos in net_positions:
+            if pos['tradingsymbol'] == symbol and pos['quantity'] != 0:
+                target_pos = pos
+                break
+
+        if not target_pos:
+            return jsonify({"success": False, "error": f"Position {symbol} not found"})
+
+        qty = target_pos['quantity']
+        abs_qty = abs(qty)
+        avg_price = target_pos['average_price']
+
+        # Get current LTP
+        try:
+            quote = provider.kite.quote([f"NFO:{symbol}"])
+            current_ltp = quote.get(f"NFO:{symbol}", {}).get('last_price', 0)
+        except:
+            current_ltp = target_pos.get('last_price', 0)
+
+        # Parse the symbol
+        match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
+        if not match:
+            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d+)(CE|PE)', symbol)
+
+        if not match:
+            return jsonify({"success": False, "error": f"Cannot parse symbol: {symbol}"})
+
+        expiry_code = match.group(1)
+        old_strike = int(match.group(2))
+        option_type = match.group(3)
+
+        # Convert expiry code to date
+        if len(expiry_code) == 5:
+            yy = int(expiry_code[:2])
+            month_char = expiry_code[2]
+            dd = int(expiry_code[3:5])
+            month_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
+                        '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
+            mm = month_map.get(month_char, int(month_char) if month_char.isdigit() else 1)
+            expiry_date = date(2000 + yy, mm, dd)
+        else:
+            return jsonify({"success": False, "error": f"Cannot parse expiry"})
+
+        # Get 7-delta strike
+        strangle_data = provider.find_strangle(expiry=expiry_date)
+        if not strangle_data:
+            return jsonify({"success": False, "error": "Cannot fetch 7-delta strike data"})
+
+        if option_type == "CE":
+            new_strike = strangle_data.call_strike
+            new_ltp = strangle_data.call_ltp
+            new_delta = strangle_data.call_delta
+        else:
+            new_strike = strangle_data.put_strike
+            new_ltp = strangle_data.put_ltp
+            new_delta = strangle_data.put_delta
+
+        new_symbol = provider.get_trading_symbol(expiry_date, new_strike, option_type)
+
+        return jsonify({
+            "success": True,
+            "current": {
+                "symbol": symbol,
+                "strike": old_strike,
+                "option_type": option_type,
+                "avg_price": avg_price,
+                "ltp": current_ltp,
+                "quantity": qty,
+            },
+            "new": {
+                "symbol": new_symbol,
+                "strike": new_strike,
+                "option_type": option_type,
+                "ltp": new_ltp,
+                "delta": round(new_delta, 4),
+                "quantity": abs_qty,
+            },
+            "expiry": expiry_date.strftime("%d-%b-%Y"),
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/position/move", methods=["POST"])
+def move_position():
+    """
+    Move a decayed position to 7-delta strike.
+
+    1. Square off the existing position
+    2. Find the 7-delta strike for same expiry and option type
+    3. Sell at the new 7-delta strike with same quantity
+    """
+    global provider
+    import re
+
+    data = request.json
+    symbol = data.get("symbol")  # e.g., "NIFTY26120CE26000"
+
+    if not symbol:
+        return jsonify({"success": False, "error": "Symbol required"})
+
+    if provider is None:
+        init_provider()
+
+    try:
+        access_token = os.getenv("KITE_ACCESS_TOKEN", "")
+        if not access_token:
+            return jsonify({"success": False, "error": "Not logged in"})
+
+        provider.kite.set_access_token(access_token)
+
+        # Get current position details
+        positions = provider.kite.positions()
+        net_positions = positions.get('net', [])
+
+        target_pos = None
+        for pos in net_positions:
+            if pos['tradingsymbol'] == symbol and pos['quantity'] != 0:
+                target_pos = pos
+                break
+
+        if not target_pos:
+            return jsonify({"success": False, "error": f"Position {symbol} not found or already closed"})
+
+        qty = target_pos['quantity']
+        abs_qty = abs(qty)
+
+        # Parse the symbol to get expiry and option type
+        # Format: NIFTY26120CE26000 or NIFTY26JAN26000CE
+        match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
+        if not match:
+            # Try alternate format
+            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d+)(CE|PE)', symbol)
+
+        if not match:
+            return jsonify({"success": False, "error": f"Cannot parse symbol: {symbol}"})
+
+        expiry_code = match.group(1)
+        old_strike = int(match.group(2))
+        option_type = match.group(3)
+
+        # Convert expiry code to date
+        # Format: 26120 = 2026-01-20 or 26JAN20 = 2026-01-20
+        if len(expiry_code) == 5:  # Weekly format: 26120
+            yy = int(expiry_code[:2])
+            month_char = expiry_code[2]
+            dd = int(expiry_code[3:5])
+            month_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
+                        '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
+            mm = month_map.get(month_char, int(month_char) if month_char.isdigit() else 1)
+            expiry_date = date(2000 + yy, mm, dd)
+        else:
+            return jsonify({"success": False, "error": f"Cannot parse expiry from: {expiry_code}"})
+
+        # Get 7-delta strike for this expiry and option type
+        strangle_data = provider.find_strangle(expiry=expiry_date)
+        if not strangle_data:
+            return jsonify({"success": False, "error": "Cannot fetch strangle data for 7-delta strike"})
+
+        if option_type == "CE":
+            new_strike = strangle_data.call_strike
+            new_ltp = strangle_data.call_ltp
+            new_delta = strangle_data.call_delta
+        else:
+            new_strike = strangle_data.put_strike
+            new_ltp = strangle_data.put_ltp
+            new_delta = strangle_data.put_delta
+
+        # Get new symbol
+        new_symbol = provider.get_trading_symbol(expiry_date, new_strike, option_type)
+        if not new_symbol:
+            return jsonify({"success": False, "error": f"Cannot find instrument for {new_strike} {option_type}"})
+
+        paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
+
+        orders_result = {
+            "square_off": None,
+            "new_position": None,
+        }
+
+        if paper_trading:
+            # Simulate orders
+            orders_result["square_off"] = {
+                "symbol": symbol,
+                "type": "BUY" if qty < 0 else "SELL",
+                "qty": abs_qty,
+                "status": "PAPER_TRADE"
+            }
+            orders_result["new_position"] = {
+                "symbol": new_symbol,
+                "type": "SELL",
+                "qty": abs_qty,
+                "strike": new_strike,
+                "delta": new_delta,
+                "ltp": new_ltp,
+                "status": "PAPER_TRADE"
+            }
+        else:
+            # Place real orders
+            try:
+                # 1. Square off existing position
+                square_off_type = "BUY" if qty < 0 else "SELL"
+                order1_id = provider.kite.place_order(
+                    variety="regular",
+                    exchange="NFO",
+                    tradingsymbol=symbol,
+                    transaction_type=square_off_type,
+                    quantity=abs_qty,
+                    product="NRML",
+                    order_type="MARKET"
+                )
+                orders_result["square_off"] = {
+                    "order_id": order1_id,
+                    "symbol": symbol,
+                    "type": square_off_type,
+                    "qty": abs_qty,
+                }
+
+                # 2. Sell new position at 7-delta
+                order2_id = provider.kite.place_order(
+                    variety="regular",
+                    exchange="NFO",
+                    tradingsymbol=new_symbol,
+                    transaction_type="SELL",
+                    quantity=abs_qty,
+                    product="NRML",
+                    order_type="MARKET"
+                )
+                orders_result["new_position"] = {
+                    "order_id": order2_id,
+                    "symbol": new_symbol,
+                    "type": "SELL",
+                    "qty": abs_qty,
+                    "strike": new_strike,
+                    "delta": new_delta,
+                    "ltp": new_ltp,
+                }
+            except Exception as e:
+                return jsonify({
+                    "success": False,
+                    "error": str(e),
+                    "partial_result": orders_result
+                })
+
+        return jsonify({
+            "success": True,
+            "old_symbol": symbol,
+            "old_strike": old_strike,
+            "new_symbol": new_symbol,
+            "new_strike": new_strike,
+            "new_delta": round(new_delta, 4),
+            "option_type": option_type,
+            "quantity": abs_qty,
+            "orders": orders_result,
+            "paper_trading": paper_trading
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)})
+
+
 @app.route("/api/positions/exit-expiry", methods=["POST"])
 def exit_expiry_positions():
     """Exit all open positions for a given expiry."""
@@ -1154,6 +1450,12 @@ def update_settings():
         value = str(int(data["lot_quantity"]))
         set_key(str(ENV_FILE), "LOT_QUANTITY", value)
         os.environ["LOT_QUANTITY"] = value
+
+    if "decay_threshold" in data:
+        # Convert percentage (e.g., 60) to decimal (0.60)
+        value = str(int(data["decay_threshold"]) / 100)
+        set_key(str(ENV_FILE), "MOVE_DECAY_THRESHOLD", value)
+        os.environ["MOVE_DECAY_THRESHOLD"] = value
 
     return jsonify({"success": True})
 
