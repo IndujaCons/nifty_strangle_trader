@@ -370,10 +370,11 @@ def market_data():
         else:
             market_status = "closed"
 
-        # Pre-market: Only fetch spot price, keep other fields blank
-        if market_status == "pre-market":
+        # Pre-market or Closed: Only fetch spot price, keep other fields blank
+        if market_status in ("pre-market", "closed"):
             try:
                 spot = provider.get_spot_price()
+                window_label = "pre-market" if market_status == "pre-market" else "closed"
                 return jsonify({
                     "timestamp": now.strftime("%H:%M:%S"),
                     "market_status": market_status,
@@ -402,7 +403,7 @@ def market_data():
                         "duration": 0,
                         "required": 300,
                         "entry_ready": False,
-                        "current_window": "pre-market",
+                        "current_window": window_label,
                         "can_trade": False,
                         "morning_trades": 0,
                         "afternoon_trades": 0,
