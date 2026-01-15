@@ -1483,6 +1483,15 @@
             startRefresh();
         });
 
+        // Shutdown server when browser tab/window closes
+        // Uses delayed shutdown (2s) that can be cancelled on page load (handles refresh)
+        window.addEventListener('beforeunload', () => {
+            navigator.sendBeacon('/api/shutdown', '');
+        });
+
+        // Cancel any pending shutdown on page load (handles refresh)
+        fetch('/api/shutdown/cancel', { method: 'POST' }).catch(() => {});
+
         let wasConnected = false;  // Track connection state for initial refresh
 
         function checkConnection() {

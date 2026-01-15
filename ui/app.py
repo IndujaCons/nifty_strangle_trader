@@ -1460,5 +1460,52 @@ def update_settings():
     return jsonify({"success": True})
 
 
+shutdown_timer = None
+shutdown_lock = None
+
+@app.route("/api/shutdown", methods=["POST"])
+def shutdown_server():
+    """Schedule server shutdown (can be cancelled by /api/shutdown/cancel)."""
+    global shutdown_timer, shutdown_lock
+    import os
+    import signal
+    import threading
+
+    if shutdown_lock is None:
+        shutdown_lock = threading.Lock()
+
+    def do_shutdown():
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    with shutdown_lock:
+        # Cancel any existing timer
+        if shutdown_timer:
+            shutdown_timer.cancel()
+
+        # Schedule shutdown after 2 seconds (allows time for cancel on refresh)
+        shutdown_timer = threading.Timer(2.0, do_shutdown)
+        shutdown_timer.start()
+
+    return jsonify({"success": True, "message": "Server will shutdown in 2 seconds..."})
+
+
+@app.route("/api/shutdown/cancel", methods=["POST"])
+def cancel_shutdown():
+    """Cancel pending shutdown (called on page load after refresh)."""
+    global shutdown_timer, shutdown_lock
+    import threading
+
+    if shutdown_lock is None:
+        shutdown_lock = threading.Lock()
+
+    with shutdown_lock:
+        if shutdown_timer:
+            shutdown_timer.cancel()
+            shutdown_timer = None
+            return jsonify({"success": True, "message": "Shutdown cancelled"})
+
+    return jsonify({"success": True, "message": "No pending shutdown"})
+
+
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8080)
