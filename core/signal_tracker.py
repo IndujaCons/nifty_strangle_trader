@@ -6,12 +6,17 @@ Tracks:
 - Trading window state (morning/afternoon)
 - Trades executed per window
 """
+import json
 from datetime import datetime, time
+from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
 from loguru import logger
 
 from config.settings import TRADING_WINDOWS, STRATEGY_CONFIG
+
+# File path for persisting trade counts
+TRADE_COUNT_FILE = Path(__file__).parent.parent / "data_store" / "daily_trades.json"
 
 
 @dataclass
@@ -26,6 +31,38 @@ class TradingWindowState:
         self.morning_trades = 0
         self.afternoon_trades = 0
         self.last_trade_time = None
+
+
+def _load_trade_counts() -> dict:
+    """Load trade counts from persistent storage."""
+    try:
+        if TRADE_COUNT_FILE.exists():
+            with open(TRADE_COUNT_FILE, 'r') as f:
+                data = json.load(f)
+                # Check if same day
+                if data.get('date') == datetime.now().strftime('%Y-%m-%d'):
+                    return data
+        return {}
+    except Exception as e:
+        logger.error(f"Error loading trade counts: {e}")
+        return {}
+
+
+def _save_trade_counts(morning: int, afternoon: int):
+    """Save trade counts to persistent storage."""
+    try:
+        TRADE_COUNT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'morning_trades': morning,
+            'afternoon_trades': afternoon,
+            'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        with open(TRADE_COUNT_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        logger.debug(f"Trade counts saved: M:{morning} A:{afternoon}")
+    except Exception as e:
+        logger.error(f"Error saving trade counts: {e}")
 
 
 @dataclass
@@ -54,6 +91,18 @@ class SignalTracker:
         self.signal_state = SignalState()
         self.window_state = TradingWindowState()
         self._last_check_date: Optional[datetime] = None
+        # Load persisted trade counts for today
+        self._load_persisted_counts()
+
+    def _load_persisted_counts(self):
+        """Load trade counts from file if same day."""
+        saved = _load_trade_counts()
+        if saved:
+            self.window_state.morning_trades = saved.get('morning_trades', 0)
+            self.window_state.afternoon_trades = saved.get('afternoon_trades', 0)
+            # Set last check date to today so we don't reset on first update_signal call
+            self._last_check_date = datetime.now()
+            logger.info(f"Loaded persisted trade counts: M:{self.window_state.morning_trades} A:{self.window_state.afternoon_trades}")
 
     def _parse_time(self, time_str: str) -> time:
         """Parse time string to time object."""
@@ -115,6 +164,9 @@ class SignalTracker:
             self.window_state.reset_for_new_day()
             self.signal_state.reset()
             self._last_check_date = now
+            # Save reset counts to file
+            _save_trade_counts(0, 0)
+            logger.info("New trading day - trade counts reset")
 
         # Check trading window
         current_window = self._get_current_window(now)
@@ -169,7 +221,12 @@ class SignalTracker:
             self.window_state.afternoon_trades += 1
         self.window_state.last_trade_time = datetime.now()
         self.signal_state.reset()
-        logger.info(f"Trade recorded in {window} window")
+        # Persist trade counts to file
+        _save_trade_counts(
+            self.window_state.morning_trades,
+            self.window_state.afternoon_trades
+        )
+        logger.info(f"Trade recorded in {window} window: M:{self.window_state.morning_trades} A:{self.window_state.afternoon_trades}")
 
     def get_next_window_time(self) -> Optional[str]:
         """Get the start time of the next available trading window."""

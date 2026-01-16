@@ -38,6 +38,56 @@ auto_sync_date = None  # Track last auto-sync date
 pcr_cache = {"pcr": None, "timestamp": 0, "max_pain": None}
 
 
+def format_expiry_key(expiry_key: str) -> str:
+    """Format expiry key to display format (DD-MM-YYYY)."""
+    import calendar
+
+    month_map = {
+        'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
+        'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+        'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
+    }
+
+    # Format: YYMMMDD (e.g., 26JAN27 = 27-01-2026) - weekly with day
+    if len(expiry_key) == 7 and expiry_key[2:5].isalpha():
+        year = f"20{expiry_key[:2]}"
+        month = month_map.get(expiry_key[2:5].upper(), '01')
+        day = expiry_key[5:7]
+        return f"{day}-{month}-{year}"
+
+    # Format: YYMMM (e.g., 26JAN = 27-01-2026) - monthly, find last Tuesday
+    if len(expiry_key) == 5 and expiry_key[2:5].isalpha():
+        year = f"20{expiry_key[:2]}"
+        month = month_map.get(expiry_key[2:5].upper(), '01')
+        year_num = int(year)
+        month_num = int(month)
+        last_day = calendar.monthrange(year_num, month_num)[1]
+        # Find last Tuesday (NSE changed from Thursday to Tuesday)
+        d = date(year_num, month_num, last_day)
+        while d.weekday() != 1:  # Tuesday
+            d = d.replace(day=d.day - 1)
+        return f"{d.day:02d}-{month}-{year}"
+
+    # Format: YYMDD (e.g., 26127 = 27-01-2026) - weekly compact
+    if len(expiry_key) == 5 and expiry_key[:2].isdigit():
+        year = f"20{expiry_key[:2]}"
+        month_char = expiry_key[2]
+        day = expiry_key[3:5]
+        if month_char.isdigit():
+            month = f"{int(month_char):02d}"
+        elif month_char == 'O':
+            month = "10"
+        elif month_char == 'N':
+            month = "11"
+        elif month_char == 'D':
+            month = "12"
+        else:
+            month = "01"
+        return f"{day}-{month}-{year}"
+
+    return expiry_key
+
+
 def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
     """Fetch PCR and max pain from Zerodha option chain."""
     global pcr_cache
@@ -225,12 +275,16 @@ def connection_status():
         provider.kite.set_access_token(access_token)
         profile = provider.kite.profile()
 
-        # Get available margin (equity.net = Available Margin in Zerodha)
+        # Get available and used margin from Zerodha
         available_margin = 0
+        used_margin = 0
         try:
             margins = provider.kite.margins()
             equity = margins.get("equity", {})
             available_margin = equity.get("net", 0)
+            # Used margin is the 'debits' field in utilised
+            utilised = equity.get("utilised", {})
+            used_margin = utilised.get("debits", 0)
         except:
             pass
 
@@ -239,6 +293,7 @@ def connection_status():
             "user": profile["user_name"],
             "email": profile.get("email", ""),
             "available_margin": available_margin,
+            "used_margin": used_margin,
         })
     except Exception as e:
         return jsonify({"connected": False, "user": None, "error": str(e)})
@@ -740,8 +795,20 @@ def execute_trade():
 
         provider.kite.set_access_token(access_token)
 
-        # Get current strangle data
-        data = provider.find_strangle()
+        # Get request data including expiry
+        req_data = request.json or {}
+        expiry_str = req_data.get("expiry")
+
+        # Parse expiry from request (format: YYYY-MM-DD)
+        expiry = None
+        if expiry_str:
+            try:
+                expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+            except ValueError:
+                return jsonify({"success": False, "error": f"Invalid expiry format: {expiry_str}"})
+
+        # Get strangle data for the specified expiry
+        data = provider.find_strangle(expiry=expiry)
         if not data:
             return jsonify({"success": False, "error": "Could not fetch strangle data"})
 
@@ -749,13 +816,12 @@ def execute_trade():
         signal_info = tracker.update_signal(data.straddle_price, data.straddle_vwap)
 
         # Check for custom strikes from request
-        req_data = request.json or {}
         call_strike = req_data.get("call_strike") or data.call_strike
         put_strike = req_data.get("put_strike") or data.put_strike
 
-        # Place order with potentially custom strikes
+        # Place order with specified expiry and potentially custom strikes
         result = provider.place_strangle_order(
-            expiry=data.expiry,
+            expiry=data.expiry,  # Use expiry from strangle data (validated)
             call_strike=call_strike,
             put_strike=put_strike,
         )
@@ -821,32 +887,19 @@ def history():
             # Process live positions for current open P&L
             for pos in nifty_positions:
                 symbol = pos['tradingsymbol']
-                match = re.match(r'NIFTY(\d{2}[A-Z]{3}|\d{2}[A-Z]\d{2}|\d{5})', symbol)
+
+                # Try different expiry patterns
+                # Monthly YYMMM must be checked BEFORE weekly YYMMMDD to avoid false matches
+                match = re.match(r'NIFTY(\d{2}[A-Z]{3})(\d{5,})(CE|PE)', symbol)  # Monthly YYMMM (26JAN)
+                if not match:
+                    match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d{5,})(CE|PE)', symbol)  # Weekly YYMMMDD (26JAN27)
+                if not match:
+                    match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)  # Weekly YYMDD (26120) - [A-Z0-9] for months 1-9 and O/N/D
                 if not match:
                     continue
 
                 expiry_key = match.group(1)
-
-                # Format expiry nicely
-                if len(expiry_key) == 5:
-                    year = f"20{expiry_key[:2]}"
-                    month_char = expiry_key[2]
-                    day = expiry_key[3:5]
-
-                    if month_char.isdigit():
-                        month = f"{int(month_char):02d}"
-                    elif month_char == 'O':
-                        month = "10"
-                    elif month_char == 'N':
-                        month = "11"
-                    elif month_char == 'D':
-                        month = "12"
-                    else:
-                        month = month_char
-
-                    expiry_display = f"{day}-{month}-{year}"
-                else:
-                    expiry_display = expiry_key
+                expiry_display = format_expiry_key(expiry_key)
 
                 if expiry_key not in live_expiry_data:
                     live_expiry_data[expiry_key] = {
@@ -1103,10 +1156,16 @@ def move_position_preview():
         except:
             current_ltp = target_pos.get('last_price', 0)
 
-        # Parse the symbol
-        match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
+        # Parse the symbol - try different formats
+        # Monthly YYMMM must be checked BEFORE weekly YYMMMDD to avoid false matches
+        # Format 1: NIFTY26JAN25000PE (monthly YYMMM)
+        match = re.match(r'NIFTY(\d{2}[A-Z]{3})(\d{5,})(CE|PE)', symbol)
+        # Format 2: NIFTY26JAN2725000PE (weekly YYMMMDD)
         if not match:
-            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d+)(CE|PE)', symbol)
+            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d{5,})(CE|PE)', symbol)
+        # Format 3: NIFTY2612025000PE (weekly compact YYMDD)
+        if not match:
+            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
 
         if not match:
             return jsonify({"success": False, "error": f"Cannot parse symbol: {symbol}"})
@@ -1116,16 +1175,36 @@ def move_position_preview():
         option_type = match.group(3)
 
         # Convert expiry code to date
-        if len(expiry_code) == 5:
+        import calendar
+        month_name_map = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                         'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+        month_char_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
+                         '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
+
+        if len(expiry_code) == 7 and expiry_code[2:5].isalpha():
+            # YYMMMDD format (e.g., 26JAN27)
+            yy = int(expiry_code[:2])
+            mm = month_name_map.get(expiry_code[2:5].upper(), 1)
+            dd = int(expiry_code[5:7])
+            expiry_date = date(2000 + yy, mm, dd)
+        elif len(expiry_code) == 5 and expiry_code[2:5].isalpha():
+            # YYMMM format (e.g., 26JAN) - monthly, find last Tuesday
+            yy = int(expiry_code[:2])
+            mm = month_name_map.get(expiry_code[2:5].upper(), 1)
+            last_day = calendar.monthrange(2000 + yy, mm)[1]
+            d = date(2000 + yy, mm, last_day)
+            while d.weekday() != 1:  # Tuesday (NSE changed from Thursday)
+                d = d.replace(day=d.day - 1)
+            expiry_date = d
+        elif len(expiry_code) == 5:
+            # YYMDD format (e.g., 26127)
             yy = int(expiry_code[:2])
             month_char = expiry_code[2]
             dd = int(expiry_code[3:5])
-            month_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
-                        '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
-            mm = month_map.get(month_char, int(month_char) if month_char.isdigit() else 1)
+            mm = month_char_map.get(month_char, int(month_char) if month_char.isdigit() else 1)
             expiry_date = date(2000 + yy, mm, dd)
         else:
-            return jsonify({"success": False, "error": f"Cannot parse expiry"})
+            return jsonify({"success": False, "error": f"Cannot parse expiry: {expiry_code}"})
 
         # Get 7-delta strike
         strangle_data = provider.find_strangle(expiry=expiry_date)
@@ -1215,11 +1294,15 @@ def move_position():
         abs_qty = abs(qty)
 
         # Parse the symbol to get expiry and option type
-        # Format: NIFTY26120CE26000 or NIFTY26JAN26000CE
-        match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
+        # Monthly YYMMM must be checked BEFORE weekly YYMMMDD to avoid false matches
+        # Format 1: NIFTY26JAN25000PE (monthly YYMMM)
+        match = re.match(r'NIFTY(\d{2}[A-Z]{3})(\d{5,})(CE|PE)', symbol)
+        # Format 2: NIFTY26JAN2725000PE (weekly YYMMMDD)
         if not match:
-            # Try alternate format
-            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d+)(CE|PE)', symbol)
+            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d{5,})(CE|PE)', symbol)
+        # Format 3: NIFTY2612025000PE (weekly compact YYMDD)
+        if not match:
+            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
 
         if not match:
             return jsonify({"success": False, "error": f"Cannot parse symbol: {symbol}"})
@@ -1229,14 +1312,33 @@ def move_position():
         option_type = match.group(3)
 
         # Convert expiry code to date
-        # Format: 26120 = 2026-01-20 or 26JAN20 = 2026-01-20
-        if len(expiry_code) == 5:  # Weekly format: 26120
+        import calendar
+        month_name_map = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                         'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+        month_char_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
+                         '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
+
+        if len(expiry_code) == 7 and expiry_code[2:5].isalpha():
+            # YYMMMDD format (e.g., 26JAN27)
+            yy = int(expiry_code[:2])
+            mm = month_name_map.get(expiry_code[2:5].upper(), 1)
+            dd = int(expiry_code[5:7])
+            expiry_date = date(2000 + yy, mm, dd)
+        elif len(expiry_code) == 5 and expiry_code[2:5].isalpha():
+            # YYMMM format (e.g., 26JAN) - monthly, find last Tuesday
+            yy = int(expiry_code[:2])
+            mm = month_name_map.get(expiry_code[2:5].upper(), 1)
+            last_day = calendar.monthrange(2000 + yy, mm)[1]
+            d = date(2000 + yy, mm, last_day)
+            while d.weekday() != 1:  # Tuesday (NSE changed from Thursday)
+                d = d.replace(day=d.day - 1)
+            expiry_date = d
+        elif len(expiry_code) == 5:
+            # YYMDD format (e.g., 26120)
             yy = int(expiry_code[:2])
             month_char = expiry_code[2]
             dd = int(expiry_code[3:5])
-            month_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
-                        '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
-            mm = month_map.get(month_char, int(month_char) if month_char.isdigit() else 1)
+            mm = month_char_map.get(month_char, int(month_char) if month_char.isdigit() else 1)
             expiry_date = date(2000 + yy, mm, dd)
         else:
             return jsonify({"success": False, "error": f"Cannot parse expiry from: {expiry_code}"})

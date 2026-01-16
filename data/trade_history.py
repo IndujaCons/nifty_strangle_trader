@@ -49,12 +49,17 @@ class TradeHistoryManager:
     def add_trade(self, trade_data: Dict) -> bool:
         """Add a new trade entry."""
         try:
+            # Double-check symbol doesn't already exist (prevent race conditions)
+            symbol = trade_data.get('symbol', '')
+            if symbol and symbol in self._load_existing_symbols():
+                return False
+
             with open(self.csv_path, 'a', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
                     trade_data.get('date', datetime.now().strftime('%Y-%m-%d')),
                     trade_data.get('expiry', ''),
-                    trade_data.get('symbol', ''),
+                    symbol,
                     trade_data.get('option_type', ''),
                     trade_data.get('strike', 0),
                     trade_data.get('quantity', 0),
@@ -94,7 +99,15 @@ class TradeHistoryManager:
                 continue
 
             # Extract expiry from symbol
-            match = re.match(r'NIFTY(\d{2}[A-Z]{3}|\d{2}[A-Z]\d{2}|\d{5})', symbol)
+            # Monthly MUST be checked BEFORE weekly to avoid false matches
+            # - NIFTY26JAN25100PE (monthly: YYMMM + 5-digit strike)
+            # - NIFTY26JAN2725100PE (weekly: YYMMMDD + 5-digit strike)
+            # - NIFTY2612725100PE (weekly compact: YYMDD + strike)
+            match = re.match(r'NIFTY(\d{2}[A-Z]{3})\d{5,}(CE|PE)', symbol)  # Monthly YYMMM
+            if not match:
+                match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})\d{5,}(CE|PE)', symbol)  # Weekly YYMMMDD
+            if not match:
+                match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})\d+(CE|PE)', symbol)  # Weekly YYMDD (months 1-9 and O/N/D)
             if not match:
                 continue
 
@@ -131,8 +144,39 @@ class TradeHistoryManager:
 
     def _format_expiry(self, expiry_key: str) -> str:
         """Format expiry key to display format."""
-        if len(expiry_key) == 5:
-            # Format: YYMDD (e.g., 26120 = 2026-01-20)
+        month_map = {
+            'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04',
+            'MAY': '05', 'JUN': '06', 'JUL': '07', 'AUG': '08',
+            'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
+        }
+
+        # Format: YYMMMDD (e.g., 26JAN27 = 27-01-2026) - weekly with day
+        if len(expiry_key) == 7 and expiry_key[2:5].isalpha():
+            year = f"20{expiry_key[:2]}"
+            month_name = expiry_key[2:5].upper()
+            day = expiry_key[5:7]
+            month = month_map.get(month_name, '01')
+            return f"{day}-{month}-{year}"
+
+        # Format: YYMMM (e.g., 26JAN = JAN-2026) - monthly without day
+        if len(expiry_key) == 5 and expiry_key[2:5].isalpha():
+            year = f"20{expiry_key[:2]}"
+            month_name = expiry_key[2:5].upper()
+            month = month_map.get(month_name, '01')
+            # Calculate last Tuesday of the month for monthly expiry (NSE changed from Thursday to Tuesday)
+            import calendar
+            month_num = int(month)
+            year_num = int(year)
+            last_day = calendar.monthrange(year_num, month_num)[1]
+            # Find last Tuesday (weekday 1)
+            from datetime import date as dt_date
+            d = dt_date(year_num, month_num, last_day)
+            while d.weekday() != 1:  # Tuesday
+                d = d.replace(day=d.day - 1)
+            return f"{d.day:02d}-{month}-{year}"
+
+        # Format: YYMDD (e.g., 26127 = 27-01-2026)
+        if len(expiry_key) == 5 and expiry_key[:2].isdigit() and not expiry_key[2:5].isalpha():
             year = f"20{expiry_key[:2]}"
             month_char = expiry_key[2]
             day = expiry_key[3:5]
@@ -146,12 +190,12 @@ class TradeHistoryManager:
             elif month_char == 'D':
                 month = "12"
             else:
-                month = month_char
+                month = "01"  # Default if unknown
 
             return f"{day}-{month}-{year}"
-        else:
-            # Format like 26JAN
-            return expiry_key
+
+        # Fallback: return as-is
+        return expiry_key
 
     def _load_existing_symbols(self) -> set:
         """Load set of existing symbols from CSV."""
