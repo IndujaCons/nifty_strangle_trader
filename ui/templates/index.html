@@ -478,6 +478,30 @@
             color: #2e7d32;
         }
 
+        .strike-btn {
+            width: 28px;
+            height: 28px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: #f5f5f5;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            color: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .strike-btn:hover {
+            background: #e0e0e0;
+            border-color: #999;
+        }
+
+        .strike-btn:active {
+            background: #d0d0d0;
+        }
+
         .move-arrow {
             font-size: 1.5rem;
             color: #888;
@@ -1212,7 +1236,7 @@
     <!-- Move Position Modal -->
     <div class="modal" id="moveModal">
         <div class="modal-content">
-            <div class="modal-header">Move Position to 7-Delta</div>
+            <div class="modal-header">Move Position</div>
             <div class="modal-body">
                 <div class="move-details">
                     <div class="move-section">
@@ -1235,7 +1259,11 @@
                         <div class="move-section-header positive">NEW SELL</div>
                         <div class="strangle-row">
                             <span class="label">Strike</span>
-                            <span class="value" id="moveNewStrike">--</span>
+                            <span class="value" style="display: flex; align-items: center; gap: 8px;">
+                                <button class="strike-btn" onclick="adjustMoveStrike(-50)">-</button>
+                                <span id="moveNewStrike" style="min-width: 60px; text-align: center;">--</span>
+                                <button class="strike-btn" onclick="adjustMoveStrike(50)">+</button>
+                            </span>
                         </div>
                         <div class="strangle-row">
                             <span class="label">LTP</span>
@@ -1272,6 +1300,7 @@
         let lastMarketData = null;
         let sipAlertShownToday = false;
         let pendingMoveSymbol = null;  // Symbol being moved
+        let pendingMoveData = null;    // Full move data including expiry, option_type, target_strike
 
         // Track custom strike adjustments
         let customStrikes = {
@@ -2200,15 +2229,21 @@
                     return;
                 }
 
-                // Store symbol for later execution
+                // Store symbol and full data for later execution
                 pendingMoveSymbol = symbol;
+                pendingMoveData = {
+                    expiry_date: data.expiry_date,
+                    option_type: data.current.option_type,
+                    target_strike: data.new.strike,
+                    default_strike: data.default_strike
+                };
 
                 // Populate modal
                 document.getElementById('moveOldStrike').textContent = data.current.strike + ' ' + data.current.option_type;
                 document.getElementById('moveOldLtp').textContent = '₹' + data.current.ltp.toFixed(2);
                 document.getElementById('moveOldQty').textContent = Math.abs(data.current.quantity);
 
-                document.getElementById('moveNewStrike').textContent = data.new.strike + ' ' + data.new.option_type;
+                document.getElementById('moveNewStrike').textContent = data.new.strike;
                 document.getElementById('moveNewLtp').textContent = '₹' + data.new.ltp.toFixed(2);
                 document.getElementById('moveNewDelta').textContent = data.new.delta;
 
@@ -2223,9 +2258,41 @@
             });
         }
 
+        function adjustMoveStrike(delta) {
+            if (!pendingMoveSymbol || !pendingMoveData) return;
+
+            // Adjust strike by delta (typically +/- 50)
+            const newStrike = pendingMoveData.target_strike + delta;
+            pendingMoveData.target_strike = newStrike;
+
+            // Update display immediately
+            document.getElementById('moveNewStrike').textContent = newStrike;
+            document.getElementById('moveNewLtp').textContent = 'loading...';
+            document.getElementById('moveNewDelta').textContent = '...';
+
+            // Fetch updated LTP and delta for new strike
+            fetch('/api/position/move/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    symbol: pendingMoveSymbol,
+                    target_strike: newStrike
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('moveNewLtp').textContent = '₹' + data.new.ltp.toFixed(2);
+                    document.getElementById('moveNewDelta').textContent = data.new.delta;
+                }
+            })
+            .catch(err => console.error('Error updating strike preview:', err));
+        }
+
         function closeMoveModal() {
             document.getElementById('moveModal').classList.remove('show');
             pendingMoveSymbol = null;
+            pendingMoveData = null;
         }
 
         function executeMove() {
@@ -2238,10 +2305,16 @@
             btn.disabled = true;
             btn.textContent = 'Moving...';
 
+            // Build payload with symbol and optional custom target strike
+            const payload = { symbol: pendingMoveSymbol };
+            if (pendingMoveData && pendingMoveData.target_strike) {
+                payload.target_strike = pendingMoveData.target_strike;
+            }
+
             fetch('/api/position/move', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ symbol: pendingMoveSymbol })
+                body: JSON.stringify(payload)
             })
             .then(res => res.json())
             .then(data => {

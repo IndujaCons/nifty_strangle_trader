@@ -1206,21 +1206,44 @@ def move_position_preview():
         else:
             return jsonify({"success": False, "error": f"Cannot parse expiry: {expiry_code}"})
 
-        # Get 7-delta strike
+        # Get 7-delta strike as default
         strangle_data = provider.find_strangle(expiry=expiry_date)
         if not strangle_data:
             return jsonify({"success": False, "error": "Cannot fetch 7-delta strike data"})
 
         if option_type == "CE":
-            new_strike = strangle_data.call_strike
-            new_ltp = strangle_data.call_ltp
-            new_delta = strangle_data.call_delta
+            default_strike = strangle_data.call_strike
         else:
-            new_strike = strangle_data.put_strike
-            new_ltp = strangle_data.put_ltp
-            new_delta = strangle_data.put_delta
+            default_strike = strangle_data.put_strike
 
+        # Check if custom target strike was provided
+        target_strike = data.get("target_strike")
+        if target_strike:
+            new_strike = int(target_strike)
+        else:
+            new_strike = default_strike
+
+        # Get LTP and delta for the target strike
         new_symbol = provider.get_trading_symbol(expiry_date, new_strike, option_type)
+        if not new_symbol:
+            return jsonify({"success": False, "error": f"Cannot find instrument for strike {new_strike}"})
+
+        # Fetch LTP for the new strike
+        try:
+            new_quote = provider.kite.quote([f"NFO:{new_symbol}"])
+            new_ltp = new_quote.get(f"NFO:{new_symbol}", {}).get('last_price', 0)
+        except:
+            new_ltp = 0
+
+        # Calculate delta for the new strike
+        try:
+            spot = strangle_data.spot_price if strangle_data else 25000
+            dte = (expiry_date - date.today()).days
+            time_to_expiry = max(dte / 365.0, 0.001)
+            from data.option_greeks import calculate_delta
+            new_delta = calculate_delta(spot, new_strike, time_to_expiry, option_type)
+        except:
+            new_delta = 0.07 if new_strike == default_strike else 0
 
         return jsonify({
             "success": True,
@@ -1237,10 +1260,12 @@ def move_position_preview():
                 "strike": new_strike,
                 "option_type": option_type,
                 "ltp": new_ltp,
-                "delta": round(new_delta, 4),
+                "delta": round(abs(new_delta), 4),
                 "quantity": abs_qty,
             },
             "expiry": expiry_date.strftime("%d-%b-%Y"),
+            "expiry_date": expiry_date.strftime("%Y-%m-%d"),
+            "default_strike": default_strike,  # 7-delta strike for reference
         })
 
     except Exception as e:
@@ -1343,24 +1368,43 @@ def move_position():
         else:
             return jsonify({"success": False, "error": f"Cannot parse expiry from: {expiry_code}"})
 
-        # Get 7-delta strike for this expiry and option type
-        strangle_data = provider.find_strangle(expiry=expiry_date)
-        if not strangle_data:
-            return jsonify({"success": False, "error": "Cannot fetch strangle data for 7-delta strike"})
+        # Check if custom target strike was provided, otherwise use 7-delta
+        target_strike = data.get("target_strike")
 
-        if option_type == "CE":
-            new_strike = strangle_data.call_strike
-            new_ltp = strangle_data.call_ltp
-            new_delta = strangle_data.call_delta
+        if target_strike:
+            new_strike = int(target_strike)
         else:
-            new_strike = strangle_data.put_strike
-            new_ltp = strangle_data.put_ltp
-            new_delta = strangle_data.put_delta
+            # Get 7-delta strike for this expiry and option type
+            strangle_data = provider.find_strangle(expiry=expiry_date)
+            if not strangle_data:
+                return jsonify({"success": False, "error": "Cannot fetch strangle data for 7-delta strike"})
+
+            if option_type == "CE":
+                new_strike = strangle_data.call_strike
+            else:
+                new_strike = strangle_data.put_strike
 
         # Get new symbol
         new_symbol = provider.get_trading_symbol(expiry_date, new_strike, option_type)
         if not new_symbol:
             return jsonify({"success": False, "error": f"Cannot find instrument for {new_strike} {option_type}"})
+
+        # Fetch LTP and delta for the target strike
+        try:
+            new_quote = provider.kite.quote([f"NFO:{new_symbol}"])
+            new_ltp = new_quote.get(f"NFO:{new_symbol}", {}).get('last_price', 0)
+        except:
+            new_ltp = 0
+
+        try:
+            strangle_data = provider.find_strangle(expiry=expiry_date) if not target_strike else None
+            spot = strangle_data.spot_price if strangle_data else 25000
+            dte = (expiry_date - date.today()).days
+            time_to_expiry = max(dte / 365.0, 0.001)
+            from data.option_greeks import calculate_delta
+            new_delta = abs(calculate_delta(spot, new_strike, time_to_expiry, option_type))
+        except:
+            new_delta = 0.07
 
         paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
 
