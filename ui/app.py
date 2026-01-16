@@ -207,6 +207,7 @@ def get_config():
         "lot_quantity": int(os.getenv("LOT_QUANTITY", "1")),
         "lot_size": NIFTY_CONFIG["lot_size"],
         "decay_threshold": int(float(os.getenv("MOVE_DECAY_THRESHOLD", "0.60")) * 100),  # As percentage
+        "target_delta": int(float(os.getenv("TARGET_DELTA", "0.07")) * 100),  # As percentage (7 = 0.07)
     }
 
 
@@ -475,8 +476,11 @@ def market_data():
         if selected_expiry:
             expiry_date = date.fromisoformat(selected_expiry)
 
-        # Get strangle data
-        data = provider.find_strangle(expiry=expiry_date)
+        # Get target delta from config (stored as decimal like 0.07)
+        target_delta = float(os.getenv("TARGET_DELTA", "0.07"))
+
+        # Get strangle data with configurable delta
+        data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
 
         if not data:
             return jsonify({
@@ -807,8 +811,11 @@ def execute_trade():
             except ValueError:
                 return jsonify({"success": False, "error": f"Invalid expiry format: {expiry_str}"})
 
-        # Get strangle data for the specified expiry
-        data = provider.find_strangle(expiry=expiry)
+        # Get target delta from config
+        target_delta = float(os.getenv("TARGET_DELTA", "0.07"))
+
+        # Get strangle data for the specified expiry with configurable delta
+        data = provider.find_strangle(expiry=expiry, target_delta=target_delta)
         if not data:
             return jsonify({"success": False, "error": "Could not fetch strangle data"})
 
@@ -1206,10 +1213,11 @@ def move_position_preview():
         else:
             return jsonify({"success": False, "error": f"Cannot parse expiry: {expiry_code}"})
 
-        # Get 7-delta strike as default
-        strangle_data = provider.find_strangle(expiry=expiry_date)
+        # Get target delta strike as default
+        target_delta = float(os.getenv("TARGET_DELTA", "0.07"))
+        strangle_data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
         if not strangle_data:
-            return jsonify({"success": False, "error": "Cannot fetch 7-delta strike data"})
+            return jsonify({"success": False, "error": "Cannot fetch target delta strike data"})
 
         if option_type == "CE":
             default_strike = strangle_data.call_strike
@@ -1374,10 +1382,11 @@ def move_position():
         if target_strike:
             new_strike = int(target_strike)
         else:
-            # Get 7-delta strike for this expiry and option type
-            strangle_data = provider.find_strangle(expiry=expiry_date)
+            # Get target delta strike for this expiry and option type
+            target_delta = float(os.getenv("TARGET_DELTA", "0.07"))
+            strangle_data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
             if not strangle_data:
-                return jsonify({"success": False, "error": "Cannot fetch strangle data for 7-delta strike"})
+                return jsonify({"success": False, "error": "Cannot fetch strangle data for target delta strike"})
 
             if option_type == "CE":
                 new_strike = strangle_data.call_strike
@@ -1619,6 +1628,12 @@ def update_settings():
         value = str(int(data["decay_threshold"]) / 100)
         set_key(str(ENV_FILE), "MOVE_DECAY_THRESHOLD", value)
         os.environ["MOVE_DECAY_THRESHOLD"] = value
+
+    if "target_delta" in data:
+        # Convert percentage (e.g., 7) to decimal (0.07)
+        value = str(int(data["target_delta"]) / 100)
+        set_key(str(ENV_FILE), "TARGET_DELTA", value)
+        os.environ["TARGET_DELTA"] = value
 
     return jsonify({"success": True})
 
