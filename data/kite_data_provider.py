@@ -252,6 +252,11 @@ class KiteDataProvider:
         from_time = datetime.combine(today, datetime.strptime("09:15", "%H:%M").time())
         to_time = datetime.now()
 
+        # Skip VWAP calculation if outside market hours (before 9:15 AM)
+        if from_time >= to_time:
+            logger.debug("Skipping VWAP: outside market hours")
+            return 0
+
         # Get NIFTY spot candles
         nifty_candles = self.kite.historical_data(
             self.NIFTY_TOKEN, from_time, to_time, "minute"

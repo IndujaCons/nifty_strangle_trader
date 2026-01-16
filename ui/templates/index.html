@@ -864,9 +864,42 @@
             border: 1px solid #f5c6cb;
             color: #6b3d3d;
         }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #333;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+            z-index: 9999;
+            max-width: 300px;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.success {
+            background: #2d5a2d;
+        }
+
+        .toast.error {
+            background: #5a2d2d;
+        }
     </style>
 </head>
 <body>
+    <!-- Toast notification -->
+    <div id="toast" class="toast"></div>
+
     <div class="header">
         <h1>NIFTY 7-Delta Strangle Trading</h1>
         <div class="status">
@@ -1961,27 +1994,44 @@
                 .catch(err => console.error('History fetch error:', err));
         }
 
-        function syncHistory() {
-            const btn = event.target;
-            btn.disabled = true;
-            btn.textContent = 'Syncing...';
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type + ' show';
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        function syncHistory(silent = false) {
+            const btn = document.querySelector('button[onclick*="syncHistory"]');
+            if (btn && !silent) {
+                btn.disabled = true;
+                btn.textContent = 'Syncing...';
+            }
 
             fetch('/api/history/sync', { method: 'POST' })
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
-                        alert(data.message);
+                        if (!silent || data.added > 0) {
+                            showToast(data.message, 'success');
+                        }
                         refreshHistory();
                     } else {
-                        alert('Sync failed: ' + data.error);
+                        showToast('Sync failed: ' + data.error, 'error');
                     }
-                    btn.disabled = false;
-                    btn.textContent = 'Sync';
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = 'Sync';
+                    }
                 })
                 .catch(err => {
-                    alert('Sync error: ' + err);
-                    btn.disabled = false;
-                    btn.textContent = 'Sync';
+                    showToast('Sync error: ' + err, 'error');
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = 'Sync';
+                    }
                 });
         }
 

@@ -32,6 +32,7 @@ load_dotenv(ENV_FILE)
 provider = None
 tracker = SignalTracker()
 last_data = {}
+auto_sync_date = None  # Track last auto-sync date
 
 # PCR cache
 pcr_cache = {"pcr": None, "timestamp": 0, "max_pain": None}
@@ -578,6 +579,22 @@ def market_data():
                 "afternoon_trades": signal_info["afternoon_trades"],
             }
         }
+
+        # Auto-sync at 3:25 PM (backend-side, runs even if frontend is inactive)
+        global auto_sync_date
+        now = datetime.now()
+        if now.hour == 15 and 25 <= now.minute <= 30 and auto_sync_date != date.today():
+            try:
+                history_manager = get_history_manager()
+                positions = provider.kite.positions()
+                net_positions = positions.get('net', [])
+                nifty_positions = [p for p in net_positions if p['tradingsymbol'].startswith('NIFTY')]
+                added = history_manager.update_from_positions(nifty_positions)
+                auto_sync_date = date.today()
+                if added > 0:
+                    print(f"[Auto-sync] Synced {added} closed positions to history")
+            except Exception as sync_err:
+                print(f"[Auto-sync] Error: {sync_err}")
 
         return jsonify(last_data)
 
