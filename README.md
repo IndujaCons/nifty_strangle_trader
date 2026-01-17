@@ -20,7 +20,7 @@ The system implements a **Delta-based Short Strangle** strategy:
 6. **Move Strategy**: Adjusts losing leg when decay drops below threshold (e.g., 60%)
 7. **Position Sizing**: Split capital into multiple chunks (recommended 6, minimum 3)
 8. **Layering**: Enter one chunk per entry signal, layering multiple high-probability strangles during gamma moves
-9. **DTE Management**: Positions are not recommended to hold beyond 7 DTE (days to expiry)
+9. **DTE Management**: Enter positions at 14-16 DTE, close by 7 DTE (do not hold beyond 7 DTE)
 
 ### Why 7-Delta?
 
