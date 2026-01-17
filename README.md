@@ -16,10 +16,11 @@ The system implements a **Delta-based Short Strangle** strategy:
 2. **Entry Signal**: Enters when ATM straddle price > straddle VWAP for 5 minutes
 3. **Entry Windows**: Morning (9:30-13:15) and Afternoon (13:15-15:15) - max 1 trade per window
 4. **Exit Target**: 50% of maximum profit (premium collected) - per expiry
-5. **Move Strategy**: Adjusts losing leg when decay drops below threshold (e.g., 60%)
-6. **Position Sizing**: Split capital into multiple chunks (recommended 6, minimum 3)
-7. **Layering**: Enter one chunk per entry signal, layering multiple high-probability strangles during gamma moves
-8. **DTE Management**: Positions are not recommended to hold beyond 7 DTE (days to expiry)
+5. **Weekly Goal**: Target 0.5% of deployed capital per week
+6. **Move Strategy**: Adjusts losing leg when decay drops below threshold (e.g., 60%)
+7. **Position Sizing**: Split capital into multiple chunks (recommended 6, minimum 3)
+8. **Layering**: Enter one chunk per entry signal, layering multiple high-probability strangles during gamma moves
+9. **DTE Management**: Positions are not recommended to hold beyond 7 DTE (days to expiry)
 
 ### Why 7-Delta?
 
