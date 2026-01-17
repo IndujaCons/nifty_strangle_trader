@@ -14,7 +14,7 @@ The system implements a **Delta-based Short Strangle** strategy:
 
 1. **Strike Selection**: Sells both Call and Put options with configurable delta (default 7-delta)
 2. **Entry Signal**: Enters when ATM straddle price > straddle VWAP for 5 minutes
-3. **Entry Windows**: Morning (9:20-11:30) and Afternoon (13:00-14:30) - max 1 trade per window
+3. **Entry Windows**: Morning (9:30-13:15) and Afternoon (13:15-15:15) - max 1 trade per window
 4. **Exit Target**: 50% of maximum profit (premium collected) - per expiry
 5. **Move Strategy**: Adjusts losing leg when decay drops below threshold (e.g., 60%)
 6. **Position Sizing**: Split capital into multiple chunks (recommended 6, minimum 3)
@@ -261,8 +261,8 @@ The system is designed for NSE market hours:
 - Pre-Market: 9:00 AM - 9:15 AM IST
 - Market Open: 9:15 AM IST
 - Market Close: 3:30 PM IST
-- Morning Window: 9:20 AM - 11:30 AM
-- Afternoon Window: 1:00 PM - 2:30 PM
+- Morning Window: 9:30 AM - 1:15 PM
+- Afternoon Window: 1:15 PM - 3:15 PM
 
 ### NSE Expiry
 
