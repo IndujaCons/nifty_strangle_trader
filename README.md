@@ -18,6 +18,8 @@ The system implements a **Delta-based Short Strangle** strategy:
 4. **Exit Target**: 50% of maximum profit (premium collected) - per expiry
 5. **Move Strategy**: Adjusts losing leg when decay drops below threshold (e.g., 60%)
 6. **Position Sizing**: Configurable lots per trade
+7. **Layering**: Multiple high-probability strangles can be layered during gamma moves
+8. **DTE Management**: Positions are not recommended to hold beyond 7 DTE (days to expiry)
 
 ### Why 7-Delta?
 
