@@ -46,6 +46,8 @@ The system implements a **Delta-based Short Strangle** strategy:
 - Manual profit entry for adjustments
 - Max profit and 50% target calculation per expiry
 
+![Sample Positions](docs/images/Sample_positiojns.jpeg)
+
 ### Auto Trade Mode
 - **Auto-Entry**: Automatically executes trades when entry signal is ready
 - **Auto-Exit**: Automatically exits positions when 50% profit target is reached
@@ -63,6 +65,8 @@ The system implements a **Delta-based Short Strangle** strategy:
 - Visual alert when 50% profit target reached (green highlight)
 - One-click "Exit All Positions" button per expiry
 - Market orders for quick execution
+
+![Sample History](docs/images/sample_history.jpeg)
 
 ![Trading Results](docs/images/results_zerodha.jpeg)
 
