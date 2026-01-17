@@ -2,19 +2,22 @@
 
 A semi-automated options trading system for NIFTY index using 7-delta strangle strategy with Zerodha Kite Connect integration.
 
+![7-Delta Strangle Strategy](docs/images/7Dstrangle.jpeg)
+
 ## Overview
 
-This system helps traders execute and manage short strangle positions on NIFTY options. It identifies 7-delta strikes (approximately 7% probability of being ITM), monitors entry signals based on straddle premium vs VWAP, and provides tools for position management with profit targets.
+This system helps traders execute and manage short strangle positions on NIFTY options. It identifies delta-based strikes (configurable 5-10 delta), monitors entry signals based on straddle premium vs VWAP, and provides tools for position management with profit targets.
 
 ### Trading Strategy
 
-The system implements a **7-Delta Short Strangle** strategy:
+The system implements a **Delta-based Short Strangle** strategy:
 
-1. **Strike Selection**: Sells both Call and Put options with delta close to 0.07 (7 delta)
+1. **Strike Selection**: Sells both Call and Put options with configurable delta (default 7-delta)
 2. **Entry Signal**: Enters when ATM straddle price > straddle VWAP for 5 minutes
-3. **Expiry Selection**: Targets options with ~14 days to expiry (DTE)
-4. **Exit Target**: 50% of maximum profit (premium collected)
-5. **Position Sizing**: Configurable lots per trade
+3. **Entry Windows**: Morning (9:20-11:30) and Afternoon (13:00-14:30) - max 1 trade per window
+4. **Exit Target**: 50% of maximum profit (premium collected) - per expiry
+5. **Move Strategy**: Adjusts losing leg when decay drops below threshold (e.g., 60%)
+6. **Position Sizing**: Configurable lots per trade
 
 ### Why 7-Delta?
 
@@ -22,28 +25,48 @@ The system implements a **7-Delta Short Strangle** strategy:
 - Provides good balance between premium collection and risk
 - Strikes are typically far enough from spot to withstand normal market movements
 
+![Theta Decay Strategy](docs/images/theta_decay_curve_modified.png)
+
 ## Features
 
 ### Market Monitor
 - Real-time NIFTY spot price and synthetic futures
 - ATM straddle price and VWAP comparison
 - Entry signal detection with 5-minute confirmation timer
-- 7-delta strangle strikes with live premiums and Greeks
+- Delta-based strangle strikes with live premiums and Greeks
 - Margin requirement calculation (with span benefit)
+- PCR (Put-Call Ratio) and Max Pain display
 
 ### Position Management
 - Current open positions with P&L tracking
+- Decay percentage for each leg (for move decisions)
 - Trade history grouped by expiry
 - Manual profit entry for adjustments
 - Max profit and 50% target calculation per expiry
+
+### Auto Trade Mode
+- **Auto-Entry**: Automatically executes trades when entry signal is ready
+- **Auto-Exit**: Automatically exits positions when 50% profit target is reached
+- **Per-Expiry**: Exit targets calculated and executed separately for each expiry
+- **Flexible**: Can be enabled/disabled mid-session
+- **Works with Manual Trades**: Auto-exit monitors all positions, not just auto-entered ones
+
+### Move Position (Decay Strategy)
+- Visual indicator when a leg's decay falls below threshold
+- One-click move to roll the losing leg to a new strike
+- Adjustable target strike with +/- controls
+- Maintains delta-based strike selection
 
 ### Exit Management
 - Visual alert when 50% profit target reached (green highlight)
 - One-click "Exit All Positions" button per expiry
 - Market orders for quick execution
 
+![Trading Results](docs/images/results_zerodha.jpeg)
+
 ### Account Info
 - Available margin display (auto-refreshes every minute)
+- Used margin display (matches Zerodha Console)
 - Connection status with Zerodha
 
 ## Prerequisites
@@ -95,11 +118,9 @@ KITE_ACCESS_TOKEN=
 # Trading Configuration
 PAPER_TRADING=true
 LOT_QUANTITY=1
-TOTAL_CAPITAL=100000
-
-# Optional: Telegram Alerts
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
+TARGET_DELTA=0.07
+MOVE_DECAY_THRESHOLD=0.60
+AUTO_TRADE=false
 ```
 
 ## Usage
@@ -128,37 +149,56 @@ The web UI will be available at: **http://localhost:8080**
 5. Paste it in the app and click "Complete Login"
 6. Your access token is saved for the session
 
-### Placing a Trade
+### Settings
 
-1. **Check Market Monitor**: Wait for "Entry Signal: Active" (straddle > VWAP for 5 mins)
-2. **Review Strangle**: Check the 7-delta strikes, premiums, and margin required
+| Setting | Range | Description |
+|---------|-------|-------------|
+| **Live Trading** | On/Off | Toggle between paper and live trading |
+| **Auto Trade** | On/Off | Enable automatic entry and exit |
+| **Lots per Trade** | 1-50 | Number of lots to trade |
+| **Target Delta** | 5-10 | Delta value for strike selection |
+| **Move Decay %** | 0-100 | Decay threshold to trigger move alert |
+
+### Manual Trading
+
+1. **Check Market Monitor**: Wait for "ENTRY READY" signal (straddle > VWAP for 5 mins)
+2. **Review Strangle**: Check the delta-based strikes, premiums, and margin required
 3. **Adjust if needed**: Use +/- buttons to modify strikes
-4. **Click "Place Trade"**: Confirm the trade details in the modal
-5. **Execute**: Click "Confirm Trade" to place market orders
+4. **Click "Place Trade"**: Executes market orders for both legs
+
+### Auto Trading
+
+1. **Enable Auto Trade** toggle in Settings
+2. **Set Target Delta** as per market conditions (lower delta = safer, higher delta = more premium)
+3. **System will automatically**:
+   - Enter trades when entry signal is ready (max 1 per window)
+   - Exit positions when 50% profit target is reached (per expiry)
+4. **Move decisions** still require manual intervention
 
 ### Monitoring Positions
 
-- **Positions Tab**: View current open positions with live P&L
+- **Positions Tab**: View current open positions with live P&L and decay %
 - **History Tab**: Track profit by expiry with max profit and 50% target
 
 ### Exiting Positions
 
-When profit reaches 50% of max profit:
-- The expiry card turns green with "50% TARGET" badge
-- Click the green "EXIT ALL" button to close all positions for that expiry
-- Confirm to place market BUY orders
+**Manual Exit:**
+- When profit reaches 50% target, the expiry card turns green
+- Click "Exit All Positions" to close all positions for that expiry
+
+**Auto Exit:**
+- With Auto Trade enabled, positions exit automatically at 50% profit
+- Works per-expiry (multiple expiries tracked independently)
 
 ## Configuration Options
-
-Edit `config/settings.py` or `.env` file:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `PAPER_TRADING` | true | Enable paper trading mode (no real orders) |
+| `AUTO_TRADE` | false | Enable automatic entry and exit |
 | `LOT_QUANTITY` | 1 | Number of lots per trade |
-| `target_delta` | 0.07 | Target delta for strike selection |
-| `entry_dte` | 14 | Days to expiry for entry |
-| `profit_target_pct` | 0.50 | Exit at 50% of max profit |
+| `TARGET_DELTA` | 0.07 | Target delta for strike selection (0.05-0.10) |
+| `MOVE_DECAY_THRESHOLD` | 0.60 | Decay % threshold for move alerts |
 | `signal_duration_seconds` | 300 | Signal confirmation time (5 mins) |
 
 ## Project Structure
@@ -169,16 +209,22 @@ nifty_strangle_trader/
 │   ├── app.py             # API endpoints
 │   └── templates/         # HTML templates
 ├── data/                   # Data providers
-│   └── kite_data_provider.py
+│   ├── kite_data_provider.py
+│   ├── trade_history.py   # Trade history persistence
+│   └── pcr_history.py     # PCR tracking
 ├── config/                 # Configuration
 │   └── settings.py
 ├── core/                   # Core trading logic
 │   ├── strategy_engine.py
+│   ├── signal_tracker.py  # Entry signal tracking
 │   └── position_manager.py
 ├── greeks/                 # Options Greeks calculation
-├── models/                 # Data models
-├── broker/                 # Broker integration
+│   └── black_scholes.py
 ├── data_store/            # Local data persistence
+│   ├── trade_history.csv
+│   └── daily_trades.json
+├── docs/                  # Documentation
+│   └── images/           # Screenshots and diagrams
 ├── run.py                 # Application entry point
 └── requirements.txt
 ```
@@ -201,7 +247,7 @@ The system starts in `PAPER_TRADING=true` mode by default. In this mode:
 - All trades are simulated
 - Use this to test and understand the system
 
-To enable live trading, set `PAPER_TRADING=false` in `.env` file.
+To enable live trading, set `PAPER_TRADING=false` or toggle "Live Trading" in the UI.
 
 ### Access Token Expiry
 
@@ -210,9 +256,16 @@ Zerodha access tokens expire daily at midnight. You need to re-login each tradin
 ### Market Hours
 
 The system is designed for NSE market hours:
+- Pre-Market: 9:00 AM - 9:15 AM IST
 - Market Open: 9:15 AM IST
 - Market Close: 3:30 PM IST
-- No trades in first 15 minutes (9:15 - 9:30)
+- Morning Window: 9:20 AM - 11:30 AM
+- Afternoon Window: 1:00 PM - 2:30 PM
+
+### NSE Expiry
+
+- Weekly expiry: Every Tuesday (changed from Thursday)
+- Monthly expiry: Last Tuesday of the month
 
 ## Troubleshooting
 
@@ -229,6 +282,12 @@ The application automatically kills any existing process on port 8080 when start
 ### Margin Calculation Shows 0
 
 Ensure you're logged in and have a valid access token. The margin API requires authentication.
+
+### Auto Trade Not Working
+
+1. Ensure "Live Trading" is ON (Auto Trade only places real orders in live mode)
+2. Check if entry signal is ready (5-minute VWAP condition)
+3. Verify you haven't already traded in the current window
 
 ## License
 

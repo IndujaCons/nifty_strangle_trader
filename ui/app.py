@@ -34,6 +34,16 @@ tracker = SignalTracker()
 last_data = {}
 auto_sync_date = None  # Track last auto-sync date
 
+# Auto-trade tracking (prevents duplicate executions)
+auto_trade_state = {
+    "last_entry_date": None,      # Date of last auto-entry
+    "last_entry_window": None,    # Window of last auto-entry (morning/afternoon)
+    "last_entry_expiry": None,    # Expiry of last auto-entry
+    "last_exit_date": None,       # Date of last auto-exit
+    "last_exit_expiry": None,     # Expiry of last auto-exit
+    "entry_premium": 0,           # Premium collected at entry (for 50% target)
+}
+
 # PCR cache
 pcr_cache = {"pcr": None, "timestamp": 0, "max_pain": None}
 
@@ -204,6 +214,7 @@ def get_config():
     return {
         "api_key": os.getenv("KITE_API_KEY", ""),
         "paper_trading": os.getenv("PAPER_TRADING", "true").lower() == "true",
+        "auto_trade": os.getenv("AUTO_TRADE", "false").lower() == "true",
         "lot_quantity": int(os.getenv("LOT_QUANTITY", "1")),
         "lot_size": NIFTY_CONFIG["lot_size"],
         "decay_threshold": int(float(os.getenv("MOVE_DECAY_THRESHOLD", "0.60")) * 100),  # As percentage
@@ -515,6 +526,143 @@ def market_data():
         config = get_config()
         total_qty = config["lot_size"] * config["lot_quantity"]
         total_premium = data.per_lot * config["lot_quantity"]
+
+        # Auto-entry: Execute trade when entry_ready and auto_trade enabled
+        global auto_trade_state
+        if (config.get("auto_trade") and
+            signal_info.get("entry_ready") and
+            not skip_signal):
+
+            current_window = signal_info.get("current_window")
+            today = date.today()
+
+            # Check if we already auto-traded for this window today
+            already_traded = (
+                auto_trade_state["last_entry_date"] == today and
+                auto_trade_state["last_entry_window"] == current_window
+            )
+
+            if not already_traded:
+                try:
+                    # Execute the trade
+                    result = provider.place_strangle_order(
+                        expiry=data.expiry,
+                        call_strike=data.call_strike,
+                        put_strike=data.put_strike,
+                    )
+
+                    if result.get("success"):
+                        # Record trade and update tracking state
+                        tracker.record_trade(current_window)
+                        auto_trade_state["last_entry_date"] = today
+                        auto_trade_state["last_entry_window"] = current_window
+                        auto_trade_state["last_entry_expiry"] = str(data.expiry)
+                        auto_trade_state["entry_premium"] = total_premium
+                        print(f"[Auto-Trade] Entry executed: {data.call_strike}CE/{data.put_strike}PE, Premium: {total_premium:.2f}")
+                    else:
+                        print(f"[Auto-Trade] Entry failed: {result.get('error', 'Unknown error')}")
+                except Exception as e:
+                    print(f"[Auto-Trade] Entry error: {e}")
+
+        # Auto-exit: Exit positions when 50% profit target is reached (PER EXPIRY)
+        # Works for ALL trades (manual or auto) based on actual position data
+        if config.get("auto_trade") and not skip_signal:
+            try:
+                import re
+
+                # Get current positions
+                positions = provider.kite.positions()
+                net_positions = positions.get('net', [])
+
+                # Filter NIFTY options with open positions
+                nifty_positions = [p for p in net_positions
+                                   if p['tradingsymbol'].startswith('NIFTY') and p['quantity'] != 0]
+
+                if nifty_positions:
+                    # Group positions by expiry
+                    # Symbol format: NIFTY2512023500CE -> expiry pattern is 251202 (YYMMDD for weekly)
+                    expiry_groups = {}
+
+                    for pos in nifty_positions:
+                        symbol = pos['tradingsymbol']
+                        # Extract expiry pattern from symbol (e.g., "25120" or "25JAN")
+                        match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2}|\d{2}[A-Z]{3})', symbol)
+                        if match:
+                            expiry_key = match.group(1)
+                            if expiry_key not in expiry_groups:
+                                expiry_groups[expiry_key] = []
+                            expiry_groups[expiry_key].append(pos)
+
+                    # Check each expiry separately
+                    today = date.today()
+                    exited_expiries = auto_trade_state.get("exited_expiries_today", set())
+
+                    # Reset exited expiries if it's a new day
+                    if auto_trade_state.get("last_exit_date") != today:
+                        exited_expiries = set()
+                        auto_trade_state["exited_expiries_today"] = exited_expiries
+
+                    for expiry_key, positions_list in expiry_groups.items():
+                        # Skip if already exited this expiry today
+                        if expiry_key in exited_expiries:
+                            continue
+
+                        # Calculate collected premium and current value for this expiry
+                        expiry_collected = 0
+                        expiry_current_value = 0
+
+                        for pos in positions_list:
+                            qty = pos['quantity']
+                            avg_price = pos.get('average_price', 0)
+                            ltp = pos.get('last_price', 0)
+
+                            if qty < 0:  # Short position (sold options)
+                                expiry_collected += avg_price * abs(qty)
+                                expiry_current_value += ltp * abs(qty)
+
+                        if expiry_collected > 0:
+                            # Profit = what we collected - what it costs to buy back
+                            expiry_profit = expiry_collected - expiry_current_value
+                            profit_target = expiry_collected * 0.5  # 50% of premium collected
+
+                            if expiry_profit >= profit_target:
+                                print(f"[Auto-Trade] Expiry {expiry_key}: 50% target reached! Profit: {expiry_profit:.2f}, Target: {profit_target:.2f}")
+
+                                orders_placed = []
+                                paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
+
+                                for pos in positions_list:
+                                    symbol = pos['tradingsymbol']
+                                    qty = pos['quantity']
+
+                                    if qty == 0:
+                                        continue
+
+                                    transaction_type = "BUY" if qty < 0 else "SELL"
+                                    exit_qty = abs(qty)
+
+                                    if paper_trading:
+                                        orders_placed.append({"symbol": symbol, "qty": exit_qty, "paper": True})
+                                    else:
+                                        order_id = provider.kite.place_order(
+                                            variety="regular",
+                                            exchange="NFO",
+                                            tradingsymbol=symbol,
+                                            transaction_type=transaction_type,
+                                            quantity=exit_qty,
+                                            order_type="MARKET",
+                                            product="NRML"
+                                        )
+                                        orders_placed.append({"symbol": symbol, "order_id": order_id})
+
+                                if orders_placed:
+                                    exited_expiries.add(expiry_key)
+                                    auto_trade_state["last_exit_date"] = today
+                                    auto_trade_state["exited_expiries_today"] = exited_expiries
+                                    print(f"[Auto-Trade] Expiry {expiry_key}: Exit complete, {len(orders_placed)} orders placed")
+
+            except Exception as e:
+                print(f"[Auto-Trade] Exit check error: {e}")
 
         # Calculate margin required using Kite's margins API
         total_margin = 0
@@ -1617,6 +1765,11 @@ def update_settings():
         value = "true" if data["paper_trading"] else "false"
         set_key(str(ENV_FILE), "PAPER_TRADING", value)
         os.environ["PAPER_TRADING"] = value
+
+    if "auto_trade" in data:
+        value = "true" if data["auto_trade"] else "false"
+        set_key(str(ENV_FILE), "AUTO_TRADE", value)
+        os.environ["AUTO_TRADE"] = value
 
     if "lot_quantity" in data:
         value = str(int(data["lot_quantity"]))

@@ -992,6 +992,14 @@
                     </div>
 
                     <div class="setting-row">
+                        <label>Auto Trade</label>
+                        <label class="toggle">
+                            <input type="checkbox" id="autoTrade" onchange="updateSettings()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="setting-row">
                         <label>Lots per Trade</label>
                         <input type="number" id="lotQuantity" min="1" max="50" value="6" onchange="updateSettings()">
                     </div>
@@ -1608,6 +1616,7 @@
                 .then(res => res.json())
                 .then(data => {
                     document.getElementById('liveTrading').checked = !data.paper_trading;
+                    document.getElementById('autoTrade').checked = data.auto_trade || false;
                     document.getElementById('lotQuantity').value = data.lot_quantity;
                     document.getElementById('lotSize').textContent = data.lot_size;
                     document.getElementById('totalQty').textContent = data.lot_quantity * data.lot_size;
@@ -1620,6 +1629,7 @@
 
         function updateSettings() {
             const liveTrading = document.getElementById('liveTrading').checked;
+            const autoTrade = document.getElementById('autoTrade').checked;
             const lotQuantity = parseInt(document.getElementById('lotQuantity').value);
             const lotSize = parseInt(document.getElementById('lotSize').textContent);
             const targetDelta = parseInt(document.getElementById('targetDelta').value);
@@ -1629,40 +1639,20 @@
             document.getElementById('lotsDisplay').textContent = lotQuantity;
             document.getElementById('deltaLabel').textContent = targetDelta;
 
-            // Save settings first
+            // Save settings first, then refresh market data immediately
             fetch('/api/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     paper_trading: !liveTrading,
+                    auto_trade: autoTrade,
                     lot_quantity: lotQuantity,
                     target_delta: targetDelta,
                     decay_threshold: decayThreshold
                 })
             }).then(() => {
-                // Fetch updated margin without resetting signal timer
-                const url = selectedExpiry
-                    ? `/api/market/data?expiry=${selectedExpiry}&skip_signal=true`
-                    : '/api/market/data?skip_signal=true';
-
-                return fetch(url);
-            }).then(res => res.json())
-            .then(data => {
-                if (data.error) return;
-
-                // Update margin and premium displays
-                document.getElementById('marginRequired').textContent =
-                    data.margin_required?.toLocaleString('en-IN', {maximumFractionDigits: 0}) || '--';
-                document.getElementById('totalPremium').textContent =
-                    data.total_premium_all_lots?.toLocaleString('en-IN', {maximumFractionDigits: 2}) || '--';
-
-                // Update lastMarketData with new values (preserving signal state)
-                if (lastMarketData) {
-                    lastMarketData.lots = data.lots;
-                    lastMarketData.total_qty = data.total_qty;
-                    lastMarketData.total_premium_all_lots = data.total_premium_all_lots;
-                    lastMarketData.margin_required = data.margin_required;
-                }
+                // Full refresh to update CE, PE, delta based on new settings
+                refreshMarketData();
             });
         }
 
