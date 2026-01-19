@@ -1166,10 +1166,6 @@
                 <div id="historyTab" class="tab-content" style="display: none;">
                     <div class="history-summary">
                         <div class="summary-card">
-                            <label>Max Profit</label>
-                            <div class="value" id="maxProfitDisplay" style="color: #1976d2;">₹0</div>
-                        </div>
-                        <div class="summary-card">
                             <label>Manual</label>
                             <div class="value" id="manualProfitDisplay">₹0</div>
                         </div>
@@ -1925,17 +1921,11 @@
             const openPnlEl = document.getElementById('openPnl');
             const totalProfitEl = document.getElementById('totalProfit');
             const manualProfitEl = document.getElementById('manualProfitDisplay');
-            const maxProfitEl = document.getElementById('maxProfitDisplay');
 
             const booked = data.booked_profit || 0;
             const open = data.open_pnl || 0;
             const manual = data.total_manual || 0;
             const total = data.total || (manual + booked + open);
-            // Max profit = open positions max + booked profit + manual profit
-            const openMaxProfit = data.max_profit || 0;
-            const maxProfit = openMaxProfit + booked + manual;
-
-            maxProfitEl.textContent = `₹${maxProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})}`;
 
             manualProfitEl.textContent = `${manual >= 0 ? '+' : ''}₹${manual.toLocaleString('en-IN', {maximumFractionDigits: 2})}`;
             manualProfitEl.className = 'value ' + (manual >= 0 ? 'positive' : 'negative');
