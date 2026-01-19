@@ -1967,74 +1967,111 @@
                 return;
             }
 
+            // Separate open and closed expiries
+            const openExpiries = data.by_expiry.filter(exp => exp.status === 'open');
+            const closedExpiries = data.by_expiry.filter(exp => exp.status === 'closed');
+
             let html = '';
-            data.by_expiry.forEach(exp => {
-                const manualVal = manualProfits[exp.expiry] || 0;
-                const expiryTotal = manualVal + exp.booked + exp.open;
-                const pnlClass = expiryTotal >= 0 ? 'positive' : 'negative';
-                const pnlSign = expiryTotal >= 0 ? '+' : '';
-                // Use API-calculated values
-                const hasOpenPositions = exp.open_positions > 0;
-                // Max profit only applies to OPEN positions - show 0 when all closed
-                const expiryMaxProfit = hasOpenPositions ? (exp.total_max_profit || 0) : 0;
-                const profitPct = hasOpenPositions ? (exp.profit_pct || 0) : 0;
-                const exitTriggered = exp.exit_triggered || false;
 
-                // Alert styling when 50% profit reached
-                const cardStyle = exitTriggered ? 'border: 2px solid #4caf50; background: #e8f5e9;' : '';
-                const alertBadge = exitTriggered ? `<span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.6rem; margin-left: 6px;">50% TARGET</span>` : '';
+            // Render open expiries first
+            openExpiries.forEach(exp => {
+                html += renderExpiryCard(exp, false);
+            });
 
-                const targetProfit = expiryMaxProfit * 0.5;
-                const maxProfitRow = hasOpenPositions && expiryMaxProfit > 0 ? `
-                            <div class="expiry-row">
-                                <span style="color: #1976d2; font-weight: 600;">Max Profit</span>
-                                <span style="color: #1976d2; font-weight: 600;">₹${expiryMaxProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})} <span style="font-size: 0.6rem; color: #666;">(${profitPct}%)</span></span>
-                            </div>
-                            <div class="expiry-row" style="border-bottom: 1px solid #eee; padding-bottom: 4px; margin-bottom: 4px;">
-                                <span style="color: #4caf50; font-weight: 600;">Target (50%)</span>
-                                <span style="color: #4caf50; font-weight: 600;">₹${targetProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})}</span>
-                            </div>` : '';
-
-                // Exit All button (only show if there are open positions)
-                const exitButton = hasOpenPositions ? `
-                            <div class="expiry-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
-                                <button onclick="exitAllPositions('${exp.expiry}')"
-                                    style="width: 100%; padding: 6px; background: ${exitTriggered ? '#4caf50' : '#ff5722'}; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-weight: 600;">
-                                    ${exitTriggered ? '✓ EXIT ALL (50% reached)' : 'Exit All Positions'}
-                                </button>
-                            </div>` : '';
-
+            // Add divider and render closed expiries
+            if (closedExpiries.length > 0) {
                 html += `
-                    <div class="expiry-card" data-expiry="${exp.expiry}" data-booked="${exp.booked}" data-open="${exp.open}" style="${cardStyle}">
-                        <div class="expiry-header">
-                            <span class="expiry-date">${exp.expiry}${alertBadge}</span>
-                            <span class="expiry-pnl ${pnlClass}">${pnlSign}₹${expiryTotal.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
-                        </div>
-                        <div class="expiry-details">
-                            ${maxProfitRow}
-                            <div class="expiry-row manual-row">
-                                <span>Manual</span>
-                                <span style="display:flex; align-items:center; gap:2px;">
-                                    <span>₹</span>
-                                    <input type="number" id="manual_${exp.expiry}" value="${manualVal}"
-                                        onchange="updateManualProfit('${exp.expiry}')"
-                                        style="width:70px; text-align:right; padding:2px 4px; border:1px solid #ddd; border-radius:3px; font-size:0.65rem;">
-                                </span>
-                            </div>
-                            <div class="expiry-row">
-                                <span>Booked</span>
-                                <span class="${exp.booked >= 0 ? 'positive' : 'negative'}">${exp.booked >= 0 ? '+' : ''}₹${exp.booked.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
-                            </div>
-                            <div class="expiry-row">
-                                <span>Open</span>
-                                <span class="${exp.open >= 0 ? 'positive' : 'negative'}">${exp.open >= 0 ? '+' : ''}₹${exp.open.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
-                            </div>
-                            ${exitButton}
-                        </div>
+                    <div style="width: 100%; text-align: center; padding: 12px 0; margin: 8px 0; border-top: 2px solid #ccc;">
+                        <span style="background: #757575; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.65rem; font-weight: 600; letter-spacing: 1px;">
+                            ARCHIVED EXPIRIES
+                        </span>
                     </div>
                 `;
-            });
+                closedExpiries.forEach(exp => {
+                    html += renderExpiryCard(exp, true);
+                });
+            }
+
             container.innerHTML = html;
+        }
+
+        function renderExpiryCard(exp, isClosed) {
+            const manualVal = manualProfits[exp.expiry] || 0;
+            const expiryTotal = manualVal + exp.booked + exp.open;
+            const pnlClass = expiryTotal >= 0 ? 'positive' : 'negative';
+            const pnlSign = expiryTotal >= 0 ? '+' : '';
+            // Use API-calculated values
+            const hasOpenPositions = exp.open_positions > 0;
+            // Max profit only applies to OPEN positions - show 0 when all closed
+            const expiryMaxProfit = hasOpenPositions ? (exp.total_max_profit || 0) : 0;
+            const profitPct = hasOpenPositions ? (exp.profit_pct || 0) : 0;
+            const exitTriggered = exp.exit_triggered || false;
+
+            // Card styling: muted for closed, alert for 50% target
+            let cardStyle = '';
+            if (isClosed) {
+                cardStyle = 'background: #f5f5f5; opacity: 0.85; border-color: #ccc;';
+            } else if (exitTriggered) {
+                cardStyle = 'border: 2px solid #4caf50; background: #e8f5e9;';
+            }
+
+            // Badge: CLOSED for archived, 50% TARGET for exit triggered
+            let badge = '';
+            if (isClosed) {
+                badge = `<span style="background: #757575; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.6rem; margin-left: 6px;">CLOSED</span>`;
+            } else if (exitTriggered) {
+                badge = `<span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.6rem; margin-left: 6px;">50% TARGET</span>`;
+            }
+
+            const targetProfit = expiryMaxProfit * 0.5;
+            const maxProfitRow = hasOpenPositions && expiryMaxProfit > 0 ? `
+                        <div class="expiry-row">
+                            <span style="color: #1976d2; font-weight: 600;">Max Profit</span>
+                            <span style="color: #1976d2; font-weight: 600;">₹${expiryMaxProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})} <span style="font-size: 0.6rem; color: #666;">(${profitPct}%)</span></span>
+                        </div>
+                        <div class="expiry-row" style="border-bottom: 1px solid #eee; padding-bottom: 4px; margin-bottom: 4px;">
+                            <span style="color: #4caf50; font-weight: 600;">Target (50%)</span>
+                            <span style="color: #4caf50; font-weight: 600;">₹${targetProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})}</span>
+                        </div>` : '';
+
+            // Exit All button (only show if there are open positions, never for closed)
+            const exitButton = (hasOpenPositions && !isClosed) ? `
+                        <div class="expiry-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+                            <button onclick="exitAllPositions('${exp.expiry}')"
+                                style="width: 100%; padding: 6px; background: ${exitTriggered ? '#4caf50' : '#ff5722'}; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-weight: 600;">
+                                ${exitTriggered ? '✓ EXIT ALL (50% reached)' : 'Exit All Positions'}
+                            </button>
+                        </div>` : '';
+
+            return `
+                <div class="expiry-card" data-expiry="${exp.expiry}" data-booked="${exp.booked}" data-open="${exp.open}" style="${cardStyle}">
+                    <div class="expiry-header">
+                        <span class="expiry-date">${exp.expiry}${badge}</span>
+                        <span class="expiry-pnl ${pnlClass}">${pnlSign}₹${expiryTotal.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
+                    </div>
+                    <div class="expiry-details">
+                        ${maxProfitRow}
+                        <div class="expiry-row manual-row">
+                            <span>Manual</span>
+                            <span style="display:flex; align-items:center; gap:2px;">
+                                <span>₹</span>
+                                <input type="number" id="manual_${exp.expiry}" value="${manualVal}"
+                                    onchange="updateManualProfit('${exp.expiry}')"
+                                    style="width:70px; text-align:right; padding:2px 4px; border:1px solid #ddd; border-radius:3px; font-size:0.65rem;">
+                            </span>
+                        </div>
+                        <div class="expiry-row">
+                            <span>Booked</span>
+                            <span class="${exp.booked >= 0 ? 'positive' : 'negative'}">${exp.booked >= 0 ? '+' : ''}₹${exp.booked.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
+                        </div>
+                        <div class="expiry-row">
+                            <span>Open</span>
+                            <span class="${exp.open >= 0 ? 'positive' : 'negative'}">${exp.open >= 0 ? '+' : ''}₹${exp.open.toLocaleString('en-IN', {maximumFractionDigits: 2})}</span>
+                        </div>
+                        ${exitButton}
+                    </div>
+                </div>
+            `;
         }
 
         function refreshHistory() {

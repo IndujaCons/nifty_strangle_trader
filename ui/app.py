@@ -1168,7 +1168,8 @@ def history():
                 'total_max_profit': total_max_profit_expiry,
                 'current_pnl': current_pnl,
                 'profit_pct': round(profit_pct, 1),
-                'exit_triggered': exit_triggered
+                'exit_triggered': exit_triggered,
+                'status': 'open' if data['open_positions'] > 0 else 'closed'
             })
 
     response = jsonify({
