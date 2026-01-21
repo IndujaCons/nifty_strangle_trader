@@ -382,11 +382,33 @@ class KiteDataProvider:
 
         # Find best call (OTM, delta closest to target)
         calls = [a for a in analyzed if a['type'] == 'CE' and a['strike'] > synth_fut and 0.03 < a['delta'] < 0.15]
+
+        # Debug: Log available calls and their deltas
+        if calls:
+            sorted_calls = sorted(calls, key=lambda x: abs(x['delta'] - target_delta))
+            logger.info(f"[Delta Selection] Top 5 calls by closeness to target {target_delta}:")
+            for c in sorted_calls[:5]:
+                diff = abs(c['delta'] - target_delta)
+                logger.info(f"  Strike {c['strike']}: delta={c['delta']:.4f}, diff={diff:.4f}")
+
         best_call = min(calls, key=lambda x: abs(x['delta'] - target_delta)) if calls else None
 
         # Find best put (OTM, |delta| closest to target)
         puts = [a for a in analyzed if a['type'] == 'PE' and a['strike'] < synth_fut and 0.03 < abs(a['delta']) < 0.15]
+
+        # Debug: Log available puts and their deltas
+        if puts:
+            sorted_puts = sorted(puts, key=lambda x: abs(abs(x['delta']) - target_delta))
+            logger.info(f"[Delta Selection] Target delta: {target_delta}")
+            logger.info(f"[Delta Selection] Top 5 puts by closeness to target:")
+            for p in sorted_puts[:5]:
+                diff = abs(abs(p['delta']) - target_delta)
+                logger.info(f"  Strike {p['strike']}: delta={p['delta']:.4f}, abs={abs(p['delta']):.4f}, diff={diff:.4f}")
+
         best_put = min(puts, key=lambda x: abs(abs(x['delta']) - target_delta)) if puts else None
+
+        if best_call and best_put:
+            logger.info(f"[Delta Selection] SELECTED: Call {best_call['strike']} (delta={best_call['delta']:.4f}), Put {best_put['strike']} (delta={best_put['delta']:.4f})")
 
         if not best_call or not best_put:
             logger.error("Could not find suitable call/put strikes")
