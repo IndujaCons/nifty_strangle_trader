@@ -69,10 +69,12 @@ class OITracker:
         # Cleanup old data
         cutoff = now - self.max_history
         self.history = [h for h in self.history if h["timestamp"] > cutoff]
+        print(f"[OI Tracker] Added: ATM={atm_strike}, CE OI={ce_oi:,} @ {ce_price}, PE OI={pe_oi:,} @ {pe_price} (total: {len(self.history)} points)")
 
     def get_analysis(self, interval_minutes=5):
         """Get OI change analysis for the specified interval."""
         if len(self.history) < 2:
+            print(f"[OI Analysis] Not enough data: {len(self.history)} points")
             return None
 
         now = time.time()
@@ -92,15 +94,15 @@ class OITracker:
 
         current = self.history[-1]
 
-        # Skip if ATM strike changed (data not comparable)
-        if old_data["atm_strike"] != current["atm_strike"]:
+        # If ATM strike changed significantly (>100 pts), try to find matching data
+        # Otherwise proceed with comparison (small ATM changes are acceptable)
+        if abs(old_data["atm_strike"] - current["atm_strike"]) > 100:
             # Find most recent data with same ATM strike
             for h in reversed(self.history[:-1]):
-                if h["atm_strike"] == current["atm_strike"] and h["timestamp"] >= cutoff:
+                if h["atm_strike"] == current["atm_strike"]:
                     old_data = h
                     break
-            else:
-                return None
+            # If no match found, still proceed with available data
 
         # Calculate changes
         ce_oi_change = current["ce_oi"] - old_data["ce_oi"]
