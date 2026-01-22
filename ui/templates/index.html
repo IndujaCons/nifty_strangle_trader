@@ -1057,7 +1057,7 @@
                         <label>Straddle VWAP</label>
                         <div class="value" id="straddleVwap">--</div>
                     </div>
-                    <div class="data-card full">
+                    <div class="data-card">
                         <label>Straddle vs VWAP</label>
                         <div class="value" id="vwapDiff">--</div>
                     </div>
@@ -1065,9 +1065,47 @@
                         <label>PCR (OI)</label>
                         <div class="value" id="pcrValue">--</div>
                     </div>
-                    <div class="data-card">
-                        <label>Max Pain</label>
-                        <div class="value" id="maxPainValue">--</div>
+                </div>
+
+                <!-- OI Analysis Section -->
+                <div class="oi-analysis-box" style="background: #fafafa; border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span style="font-weight: 600; font-size: 0.8rem; color: #333;">OI Analysis</span>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <select id="oiInterval" onchange="updateOIInterval()" style="padding: 2px 6px; font-size: 0.7rem; border-radius: 4px; border: 1px solid #ddd;">
+                                <option value="5">5 min</option>
+                                <option value="15">15 min</option>
+                                <option value="60">1 hr</option>
+                            </select>
+                            <span class="oi-signal" id="oiSignal" style="padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: #e0e0e0; color: #666;">--</span>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.7rem;">
+                        <div style="background: white; padding: 8px; border-radius: 4px; border-left: 3px solid #2196f3;">
+                            <div style="color: #666; margin-bottom: 4px;">ATM CE (<span id="oiAtmStrike">--</span>)</div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>Price:</span>
+                                <span id="oiCePrice" style="font-weight: 500;">--</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>OI Chg:</span>
+                                <span id="oiCeOiChange" style="font-weight: 500;">--</span>
+                            </div>
+                        </div>
+                        <div style="background: white; padding: 8px; border-radius: 4px; border-left: 3px solid #f44336;">
+                            <div style="color: #666; margin-bottom: 4px;">ATM PE (<span id="oiAtmStrikePe">--</span>)</div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>Price:</span>
+                                <span id="oiPePrice" style="font-weight: 500;">--</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>OI Chg:</span>
+                                <span id="oiPeOiChange" style="font-weight: 500;">--</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="oiReason" style="margin-top: 8px; font-size: 0.7rem; color: #666; text-align: center; font-style: italic;">
+                        Collecting data...
                     </div>
                 </div>
 
@@ -1521,8 +1559,8 @@
                     document.getElementById('straddlePrice').textContent = marketData.straddle_price?.toFixed(2) || '--';
                     document.getElementById('straddleVwap').textContent = marketData.straddle_vwap?.toFixed(2) || '--';
                     document.getElementById('pcrValue').textContent = marketData.pcr?.toFixed(2) || '--';
-                    document.getElementById('maxPainValue').textContent = marketData.max_pain?.toLocaleString('en-IN') || '--';
                     document.getElementById('lastUpdate').textContent = marketData.timestamp;
+                    updateOIAnalysisDisplay(marketData.oi_analysis);
 
                     if (marketData.call) {
                         document.getElementById('callStrike').textContent = marketData.call.strike;
@@ -1693,6 +1731,78 @@
             });
         }
 
+        // OI Analysis interval (default 5 min)
+        let oiInterval = 5;
+
+        function updateOIInterval() {
+            oiInterval = parseInt(document.getElementById('oiInterval').value);
+            refreshMarketData();  // Refresh immediately with new interval
+        }
+
+        function updateOIAnalysisDisplay(analysis) {
+            const signalEl = document.getElementById('oiSignal');
+            const reasonEl = document.getElementById('oiReason');
+
+            if (!analysis) {
+                signalEl.textContent = '--';
+                signalEl.style.background = '#e0e0e0';
+                signalEl.style.color = '#666';
+                reasonEl.textContent = 'Collecting data...';
+                document.getElementById('oiAtmStrike').textContent = '--';
+                document.getElementById('oiAtmStrikePe').textContent = '--';
+                document.getElementById('oiCePrice').textContent = '--';
+                document.getElementById('oiCeOiChange').textContent = '--';
+                document.getElementById('oiPePrice').textContent = '--';
+                document.getElementById('oiPeOiChange').textContent = '--';
+                return;
+            }
+
+            // Update ATM strike
+            document.getElementById('oiAtmStrike').textContent = analysis.atm_strike;
+            document.getElementById('oiAtmStrikePe').textContent = analysis.atm_strike;
+
+            // CE Price change
+            const cePriceEl = document.getElementById('oiCePrice');
+            const cePriceSign = analysis.ce_price_change >= 0 ? '+' : '';
+            cePriceEl.textContent = `₹${analysis.ce_price_new?.toFixed(1)} (${cePriceSign}${analysis.ce_price_pct}%)`;
+            cePriceEl.style.color = analysis.ce_price_change >= 0 ? '#4caf50' : '#f44336';
+
+            // CE OI change
+            const ceOiEl = document.getElementById('oiCeOiChange');
+            const ceOiSign = analysis.ce_oi_change >= 0 ? '+' : '';
+            ceOiEl.textContent = `${ceOiSign}${(analysis.ce_oi_change / 1000).toFixed(0)}K (${ceOiSign}${analysis.ce_oi_pct}%)`;
+            ceOiEl.style.color = analysis.ce_oi_change >= 0 ? '#4caf50' : '#f44336';
+
+            // PE Price change
+            const pePriceEl = document.getElementById('oiPePrice');
+            const pePriceSign = analysis.pe_price_change >= 0 ? '+' : '';
+            pePriceEl.textContent = `₹${analysis.pe_price_new?.toFixed(1)} (${pePriceSign}${analysis.pe_price_pct}%)`;
+            pePriceEl.style.color = analysis.pe_price_change >= 0 ? '#4caf50' : '#f44336';
+
+            // PE OI change
+            const peOiEl = document.getElementById('oiPeOiChange');
+            const peOiSign = analysis.pe_oi_change >= 0 ? '+' : '';
+            peOiEl.textContent = `${peOiSign}${(analysis.pe_oi_change / 1000).toFixed(0)}K (${peOiSign}${analysis.pe_oi_pct}%)`;
+            peOiEl.style.color = analysis.pe_oi_change >= 0 ? '#4caf50' : '#f44336';
+
+            // Signal
+            signalEl.textContent = analysis.signal;
+            if (analysis.signal === 'BULLISH') {
+                signalEl.style.background = '#4caf50';
+                signalEl.style.color = 'white';
+            } else if (analysis.signal === 'BEARISH') {
+                signalEl.style.background = '#f44336';
+                signalEl.style.color = 'white';
+            } else {
+                signalEl.style.background = '#ff9800';
+                signalEl.style.color = 'white';
+            }
+
+            // Reason
+            const dataAge = Math.floor(analysis.data_age_seconds / 60);
+            reasonEl.textContent = `${analysis.reason} (${analysis.confidence} confidence, ${dataAge}m data)`;
+        }
+
         function startRefresh() {
             refreshMarketData();
             refreshPositions();
@@ -1704,7 +1814,8 @@
         }
 
         function refreshMarketData() {
-            const url = selectedExpiry ? `/api/market/data?expiry=${selectedExpiry}` : '/api/market/data';
+            const oiIntervalParam = oiInterval ? `&oi_interval=${oiInterval}` : '';
+            const url = selectedExpiry ? `/api/market/data?expiry=${selectedExpiry}${oiIntervalParam}` : `/api/market/data?oi_interval=${oiInterval}`;
             console.log('[Market Data] Fetching:', url, 'selectedExpiry:', selectedExpiry);
             fetch(url)
                 .then(res => res.json())
@@ -1744,7 +1855,7 @@
                         diffEl.className = 'value ' + (data.vwap_diff >= 0 ? 'positive' : 'negative');
                     }
 
-                    // PCR and Max Pain
+                    // PCR
                     const pcrEl = document.getElementById('pcrValue');
                     if (data.pcr !== null && data.pcr !== undefined) {
                         pcrEl.textContent = data.pcr.toFixed(2);
@@ -1753,7 +1864,9 @@
                     } else {
                         pcrEl.textContent = '--';
                     }
-                    document.getElementById('maxPainValue').textContent = data.max_pain?.toLocaleString('en-IN') || '--';
+
+                    // OI Analysis
+                    updateOIAnalysisDisplay(data.oi_analysis);
 
                     // SIP Alert - show popup if triggered
                     if (data.sip_alert && !sipAlertShownToday) {

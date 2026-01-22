@@ -47,6 +47,162 @@ auto_trade_state = {
 # PCR cache
 pcr_cache = {"pcr": None, "timestamp": 0, "max_pain": None}
 
+# OI Tracker for ATM straddle analysis
+class OITracker:
+    """Track OI and price changes for ATM CE/PE to generate directional signals."""
+
+    def __init__(self, max_history_minutes=120):
+        self.history = []  # List of {timestamp, atm_strike, ce_oi, ce_price, pe_oi, pe_price}
+        self.max_history = max_history_minutes * 60  # Convert to seconds
+
+    def add_data(self, atm_strike, ce_oi, ce_price, pe_oi, pe_price):
+        """Add a new data point."""
+        now = time.time()
+        self.history.append({
+            "timestamp": now,
+            "atm_strike": atm_strike,
+            "ce_oi": ce_oi,
+            "ce_price": ce_price,
+            "pe_oi": pe_oi,
+            "pe_price": pe_price
+        })
+        # Cleanup old data
+        cutoff = now - self.max_history
+        self.history = [h for h in self.history if h["timestamp"] > cutoff]
+
+    def get_analysis(self, interval_minutes=5):
+        """Get OI change analysis for the specified interval."""
+        if len(self.history) < 2:
+            return None
+
+        now = time.time()
+        interval_seconds = interval_minutes * 60
+        cutoff = now - interval_seconds
+
+        # Find the oldest data point within the interval
+        old_data = None
+        for h in self.history:
+            if h["timestamp"] >= cutoff:
+                old_data = h
+                break
+
+        if not old_data:
+            # Use oldest available if no data in interval
+            old_data = self.history[0]
+
+        current = self.history[-1]
+
+        # Skip if ATM strike changed (data not comparable)
+        if old_data["atm_strike"] != current["atm_strike"]:
+            # Find most recent data with same ATM strike
+            for h in reversed(self.history[:-1]):
+                if h["atm_strike"] == current["atm_strike"] and h["timestamp"] >= cutoff:
+                    old_data = h
+                    break
+            else:
+                return None
+
+        # Calculate changes
+        ce_oi_change = current["ce_oi"] - old_data["ce_oi"]
+        pe_oi_change = current["pe_oi"] - old_data["pe_oi"]
+        ce_price_change = current["ce_price"] - old_data["ce_price"]
+        pe_price_change = current["pe_price"] - old_data["pe_price"]
+
+        # Calculate percentage changes
+        ce_oi_pct = (ce_oi_change / old_data["ce_oi"] * 100) if old_data["ce_oi"] > 0 else 0
+        pe_oi_pct = (pe_oi_change / old_data["pe_oi"] * 100) if old_data["pe_oi"] > 0 else 0
+        ce_price_pct = (ce_price_change / old_data["ce_price"] * 100) if old_data["ce_price"] > 0 else 0
+        pe_price_pct = (pe_price_change / old_data["pe_price"] * 100) if old_data["pe_price"] > 0 else 0
+
+        # Determine signals (10% threshold for significant OI change)
+        oi_threshold = 10
+        ce_oi_up = ce_oi_pct > oi_threshold
+        ce_oi_down = ce_oi_pct < -oi_threshold
+        pe_oi_up = pe_oi_pct > oi_threshold
+        pe_oi_down = pe_oi_pct < -oi_threshold
+        ce_price_up = ce_price_change > 0
+        pe_price_up = pe_price_change > 0
+
+        # Generate signal based on combinations
+        signal = "NEUTRAL"
+        confidence = "Low"
+        reason = ""
+
+        # Strong Bullish: CE price up + OI up, PE price down + OI up (put writing)
+        if ce_price_up and ce_oi_up and not pe_price_up and pe_oi_up:
+            signal = "BULLISH"
+            confidence = "High"
+            reason = "CE longs building + PE writing"
+        # Strong Bearish: CE price down + OI up, PE price up + OI up
+        elif not ce_price_up and ce_oi_up and pe_price_up and pe_oi_up:
+            signal = "BEARISH"
+            confidence = "High"
+            reason = "CE shorts building + PE longs building"
+        # Bullish: CE price up + OI up
+        elif ce_price_up and ce_oi_up:
+            signal = "BULLISH"
+            confidence = "Medium"
+            reason = "New CE longs entering"
+        # Bullish: PE price down + OI up (put writing)
+        elif not pe_price_up and pe_oi_up:
+            signal = "BULLISH"
+            confidence = "Medium"
+            reason = "Put writing (PE shorts)"
+        # Bearish: PE price up + OI up
+        elif pe_price_up and pe_oi_up:
+            signal = "BEARISH"
+            confidence = "Medium"
+            reason = "New PE longs entering"
+        # Bearish: CE price down + OI up (call writing)
+        elif not ce_price_up and ce_oi_up:
+            signal = "BEARISH"
+            confidence = "Medium"
+            reason = "Call writing (CE shorts)"
+        # Mild signals based on unwinding
+        elif ce_price_up and ce_oi_down:
+            signal = "BULLISH"
+            confidence = "Low"
+            reason = "CE short covering"
+        elif pe_price_up and pe_oi_down:
+            signal = "BEARISH"
+            confidence = "Low"
+            reason = "PE short covering"
+        elif not ce_price_up and ce_oi_down:
+            signal = "BEARISH"
+            confidence = "Low"
+            reason = "CE long unwinding"
+        elif not pe_price_up and pe_oi_down:
+            signal = "BULLISH"
+            confidence = "Low"
+            reason = "PE long unwinding"
+
+        return {
+            "atm_strike": current["atm_strike"],
+            "interval_minutes": interval_minutes,
+            "ce_oi_old": old_data["ce_oi"],
+            "ce_oi_new": current["ce_oi"],
+            "ce_oi_change": ce_oi_change,
+            "ce_oi_pct": round(ce_oi_pct, 1),
+            "ce_price_old": old_data["ce_price"],
+            "ce_price_new": current["ce_price"],
+            "ce_price_change": round(ce_price_change, 2),
+            "ce_price_pct": round(ce_price_pct, 1),
+            "pe_oi_old": old_data["pe_oi"],
+            "pe_oi_new": current["pe_oi"],
+            "pe_oi_change": pe_oi_change,
+            "pe_oi_pct": round(pe_oi_pct, 1),
+            "pe_price_old": old_data["pe_price"],
+            "pe_price_new": current["pe_price"],
+            "pe_price_change": round(pe_price_change, 2),
+            "pe_price_pct": round(pe_price_pct, 1),
+            "signal": signal,
+            "confidence": confidence,
+            "reason": reason,
+            "data_age_seconds": int(now - old_data["timestamp"])
+        }
+
+oi_tracker = OITracker()
+
 
 def format_expiry_key(expiry_key: str) -> str:
     """Format expiry key to display format (DD-MM-YYYY)."""
@@ -165,41 +321,53 @@ def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
             quotes = kite_provider.kite.quote(batch)
             all_quotes.update(quotes)
 
-        # Calculate OI totals
+        # Calculate OI totals and track ATM data for OI analysis
         total_ce_oi = 0
         total_pe_oi = 0
-        strike_oi = {}
+        atm_ce_oi = 0
+        atm_ce_price = 0
+        atm_pe_oi = 0
+        atm_pe_price = 0
 
         for opt in relevant_options:
             symbol = f"NFO:{opt['tradingsymbol']}"
             quote = all_quotes.get(symbol, {})
             oi = quote.get('oi', 0)
+            ltp = quote.get('last_price', 0)
             strike = opt['strike']
 
             if opt['instrument_type'] == 'CE':
                 total_ce_oi += oi
+                # Track ATM CE
+                if strike == atm_strike:
+                    atm_ce_oi = oi
+                    atm_ce_price = ltp
             else:
                 total_pe_oi += oi
+                # Track ATM PE
+                if strike == atm_strike:
+                    atm_pe_oi = oi
+                    atm_pe_price = ltp
 
-            # Accumulate OI per strike for max pain
-            if strike not in strike_oi:
-                strike_oi[strike] = 0
-            strike_oi[strike] += oi
+        # Update OI tracker with ATM data
+        if atm_ce_oi > 0 and atm_pe_oi > 0:
+            oi_tracker.add_data(atm_strike, atm_ce_oi, atm_ce_price, atm_pe_oi, atm_pe_price)
 
         # Calculate PCR
         pcr = round(total_pe_oi / total_ce_oi, 2) if total_ce_oi > 0 else 0
 
-        # Calculate max pain (strike with highest total OI)
-        max_pain = max(strike_oi, key=strike_oi.get) if strike_oi else 0
-
         pcr_cache = {
             "pcr": pcr,
-            "max_pain": max_pain,
             "ce_oi": total_ce_oi,
             "pe_oi": total_pe_oi,
+            "atm_strike": atm_strike,
+            "atm_ce_oi": atm_ce_oi,
+            "atm_ce_price": atm_ce_price,
+            "atm_pe_oi": atm_pe_oi,
+            "atm_pe_price": atm_pe_price,
             "timestamp": time.time()
         }
-        print(f"PCR: {pcr}, Max Pain: {max_pain}, CE OI: {total_ce_oi:,}, PE OI: {total_pe_oi:,}")
+        print(f"PCR: {pcr}, ATM: {atm_strike}, CE OI: {atm_ce_oi:,} @ {atm_ce_price}, PE OI: {atm_pe_oi:,} @ {atm_pe_price}")
         return pcr_cache
 
     except Exception as e:
@@ -731,10 +899,10 @@ def market_data():
 
         # Auto-save PCR at 3:25 PM (before market close)
         if "15:20" <= current_time_str <= "15:30":
-            if pcr_value is not None and pcr_data.get("max_pain"):
+            if pcr_value is not None:
                 saved = pcr_manager.save_pcr(
                     pcr=pcr_value,
-                    max_pain=pcr_data.get("max_pain", 0),
+                    max_pain=0,  # Deprecated
                     ce_oi=pcr_data.get("ce_oi", 0),
                     pe_oi=pcr_data.get("pe_oi", 0),
                     spot=data.spot,
@@ -742,6 +910,10 @@ def market_data():
                 )
                 if saved:
                     print(f"PCR saved to history: {pcr_value}")
+
+        # Get OI analysis (default 5 min interval, can be overridden by query param)
+        oi_interval = int(request.args.get('oi_interval', 5))
+        oi_analysis = oi_tracker.get_analysis(interval_minutes=oi_interval)
 
         last_data = {
             "timestamp": now.strftime("%H:%M:%S"),
@@ -774,7 +946,7 @@ def market_data():
             "total_premium_all_lots": total_premium,
             "margin_required": total_margin,
             "pcr": pcr_value,
-            "max_pain": pcr_data.get("max_pain"),
+            "oi_analysis": oi_analysis,
             "sip_alert": sip_alert,
             "signal": {
                 "active": signal_info["signal_active"],
