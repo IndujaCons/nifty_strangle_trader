@@ -337,9 +337,10 @@ class KiteDataProvider:
         atm_strike = get_atm_strike(spot)
 
         # Get strikes around ATM - wider range for longer DTE
-        # For 7 DTE: ~750 pts OTM, for 14 DTE: ~1500 pts OTM
-        strike_range = max(20, dte * 2)  # More strikes for longer DTE
+        # Need ~1500-2000 pts OTM to reach 5-delta strikes
+        strike_range = max(30, dte * 3)  # More strikes for longer DTE
         strikes = [atm_strike + (i * 50) for i in range(-strike_range, strike_range + 1)]
+        logger.info(f"[Strike Range] ATM={atm_strike}, range={strike_range} strikes, min={atm_strike - strike_range*50}, max={atm_strike + strike_range*50}")
         quotes = self.get_option_quotes(expiry, strikes)
 
         if atm_strike not in quotes:
@@ -357,6 +358,7 @@ class KiteDataProvider:
         # Calculate IV and delta for all options
         T = dte / 365.0
         analyzed = []
+        skipped_puts_no_ltp = []
 
         for strike, opts in quotes.items():
             for opt_type in ['CE', 'PE']:
@@ -379,14 +381,20 @@ class KiteDataProvider:
                             'delta': delta,
                             'oi': opt['oi']
                         })
+                elif opt_type == 'PE' and strike < synth_fut and (not opt or opt.get('ltp', 0) == 0):
+                    skipped_puts_no_ltp.append(strike)
+
+        # Dynamic delta range based on target (allow half of target as minimum)
+        min_delta = min(0.02, target_delta / 2)
+        max_delta = max(0.15, target_delta * 2)
 
         # Find best call (OTM, delta closest to target)
-        calls = [a for a in analyzed if a['type'] == 'CE' and a['strike'] > synth_fut and 0.03 < a['delta'] < 0.15]
+        calls = [a for a in analyzed if a['type'] == 'CE' and a['strike'] > synth_fut and min_delta < a['delta'] < max_delta]
 
         # Debug: Log available calls and their deltas
         if calls:
             sorted_calls = sorted(calls, key=lambda x: abs(x['delta'] - target_delta))
-            logger.info(f"[Delta Selection] Top 5 calls by closeness to target {target_delta}:")
+            logger.info(f"[Delta Selection] Top 5 calls by closeness to target {target_delta} (range {min_delta:.3f}-{max_delta:.3f}):")
             for c in sorted_calls[:5]:
                 diff = abs(c['delta'] - target_delta)
                 logger.info(f"  Strike {c['strike']}: delta={c['delta']:.4f}, diff={diff:.4f}")
@@ -395,13 +403,13 @@ class KiteDataProvider:
 
         # Find best put (OTM, |delta| closest to target)
         all_otm_puts = [a for a in analyzed if a['type'] == 'PE' and a['strike'] < synth_fut]
-        puts = [p for p in all_otm_puts if 0.03 < abs(p['delta']) < 0.15]
+        puts = [p for p in all_otm_puts if min_delta < abs(p['delta']) < max_delta]
 
-        # Debug: Log puts that were filtered out
-        filtered_out = [p for p in all_otm_puts if not (0.03 < abs(p['delta']) < 0.15)]
-        if filtered_out:
-            filtered_sorted = sorted(filtered_out, key=lambda x: x['strike'], reverse=True)[:5]
-            logger.info(f"[Delta Selection] Puts filtered out (|delta| outside 0.03-0.15):")
+        # Debug: Log puts that were filtered out (show lowest delta ones)
+        filtered_out_low = [p for p in all_otm_puts if abs(p['delta']) <= min_delta]
+        if filtered_out_low:
+            filtered_sorted = sorted(filtered_out_low, key=lambda x: x['strike'], reverse=True)[:5]
+            logger.info(f"[Delta Selection] Puts filtered out (|delta| <= {min_delta:.3f}):")
             for p in filtered_sorted:
                 logger.info(f"  Strike {p['strike']}: delta={p['delta']:.4f}")
 
@@ -415,6 +423,13 @@ class KiteDataProvider:
                 logger.info(f"  Strike {p['strike']}: delta={p['delta']:.4f}, abs={abs(p['delta']):.4f}, diff={diff:.4f}")
 
         best_put = min(puts, key=lambda x: abs(abs(x['delta']) - target_delta)) if puts else None
+
+        # Log puts with no LTP (potential strikes we're missing)
+        if skipped_puts_no_ltp:
+            relevant_skipped = [s for s in skipped_puts_no_ltp if s < (best_put['strike'] if best_put else synth_fut)]
+            if relevant_skipped:
+                top_skipped = sorted(relevant_skipped, reverse=True)[:5]
+                logger.info(f"[Delta Selection] Puts with NO LTP (below selected): {top_skipped}")
 
         if best_call and best_put:
             logger.info(f"[Delta Selection] SELECTED: Call {best_call['strike']} (delta={best_call['delta']:.4f}), Put {best_put['strike']} (delta={best_put['delta']:.4f})")

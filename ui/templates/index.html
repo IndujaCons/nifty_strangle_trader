@@ -1353,6 +1353,7 @@
         function onExpiryChange() {
             const selector = document.getElementById('expirySelector');
             selectedExpiry = selector.value;
+            console.log('[Expiry] Changed to:', selectedExpiry);
             // Reset custom strikes when expiry changes
             customStrikes = { call: null, put: null };
             originalStrikes = { call: null, put: null };
@@ -1650,7 +1651,7 @@
             .then(response => response.json())
             .then(() => {
                 // Small delay to ensure env var is set before refresh
-                console.log('[Settings] Saved, refreshing market data...');
+                console.log('[Settings] Saved, selectedExpiry:', selectedExpiry, ', refreshing market data...');
                 setTimeout(() => refreshMarketData(), 100);
             })
             .catch(err => {
@@ -1704,6 +1705,7 @@
 
         function refreshMarketData() {
             const url = selectedExpiry ? `/api/market/data?expiry=${selectedExpiry}` : '/api/market/data';
+            console.log('[Market Data] Fetching:', url, 'selectedExpiry:', selectedExpiry);
             fetch(url)
                 .then(res => res.json())
                 .then(data => {

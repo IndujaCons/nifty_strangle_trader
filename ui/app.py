@@ -489,7 +489,7 @@ def market_data():
 
         # Get target delta from config (stored as decimal like 0.07)
         target_delta = float(os.getenv("TARGET_DELTA", "0.07"))
-        print(f"[Market Data] TARGET_DELTA read: {target_delta}")
+        print(f"[Market Data] expiry={selected_expiry}, TARGET_DELTA={target_delta}")
 
         # Get strangle data with configurable delta
         data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
