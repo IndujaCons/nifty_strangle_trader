@@ -1646,9 +1646,17 @@
                     target_delta: targetDelta,
                     decay_threshold: decayThreshold
                 })
-            }).then(() => {
-                // Full refresh to update CE, PE, delta based on new settings
-                refreshMarketData();
+            })
+            .then(response => response.json())
+            .then(() => {
+                // Small delay to ensure env var is set before refresh
+                console.log('[Settings] Saved, refreshing market data...');
+                setTimeout(() => refreshMarketData(), 100);
+            })
+            .catch(err => {
+                console.error('[Settings] Error:', err);
+                // Still try to refresh even on error
+                setTimeout(() => refreshMarketData(), 100);
             });
         }
 

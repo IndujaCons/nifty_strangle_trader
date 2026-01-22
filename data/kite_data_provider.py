@@ -394,7 +394,16 @@ class KiteDataProvider:
         best_call = min(calls, key=lambda x: abs(x['delta'] - target_delta)) if calls else None
 
         # Find best put (OTM, |delta| closest to target)
-        puts = [a for a in analyzed if a['type'] == 'PE' and a['strike'] < synth_fut and 0.03 < abs(a['delta']) < 0.15]
+        all_otm_puts = [a for a in analyzed if a['type'] == 'PE' and a['strike'] < synth_fut]
+        puts = [p for p in all_otm_puts if 0.03 < abs(p['delta']) < 0.15]
+
+        # Debug: Log puts that were filtered out
+        filtered_out = [p for p in all_otm_puts if not (0.03 < abs(p['delta']) < 0.15)]
+        if filtered_out:
+            filtered_sorted = sorted(filtered_out, key=lambda x: x['strike'], reverse=True)[:5]
+            logger.info(f"[Delta Selection] Puts filtered out (|delta| outside 0.03-0.15):")
+            for p in filtered_sorted:
+                logger.info(f"  Strike {p['strike']}: delta={p['delta']:.4f}")
 
         # Debug: Log available puts and their deltas
         if puts:
