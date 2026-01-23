@@ -1684,6 +1684,7 @@
             const autoExit = document.getElementById('autoExit').checked;
             const exitTargetPct = parseInt(document.getElementById('exitTargetPct').value);
             window.exitTargetPct = exitTargetPct;
+            refreshHistory();  // Re-render history with new target %
             const lotQuantity = parseInt(document.getElementById('lotQuantity').value);
             const lotSize = parseInt(document.getElementById('lotSize').textContent);
             const targetDelta = parseInt(document.getElementById('targetDelta').value);
