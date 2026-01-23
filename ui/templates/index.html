@@ -2180,7 +2180,7 @@
             }
 
             const targetProfit = expiryMaxProfit * (window.exitTargetPct / 100);
-            const maxProfitRow = hasOpenPositions && expiryMaxProfit > 0 ? `
+            const maxProfitRow = hasOpenPositions ? `
                         <div class="expiry-row">
                             <span style="color: #1976d2; font-weight: 600;">Max Profit</span>
                             <span style="color: #1976d2; font-weight: 600;">₹${expiryMaxProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})} <span style="font-size: 0.6rem; color: #666;">(${profitPct}%)</span></span>
