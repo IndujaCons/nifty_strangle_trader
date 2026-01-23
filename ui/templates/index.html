@@ -1667,6 +1667,7 @@
                     document.getElementById('autoTrade').checked = data.auto_trade || false;
                     document.getElementById('autoExit').checked = data.auto_exit !== false;  // default true
                     document.getElementById('exitTargetPct').value = data.exit_target_pct || 50;
+                    window.exitTargetPct = data.exit_target_pct || 50;
                     document.getElementById('lotQuantity').value = data.lot_quantity;
                     document.getElementById('lotSize').textContent = data.lot_size;
                     document.getElementById('totalQty').textContent = data.lot_quantity * data.lot_size;
@@ -1682,6 +1683,7 @@
             const autoTrade = document.getElementById('autoTrade').checked;
             const autoExit = document.getElementById('autoExit').checked;
             const exitTargetPct = parseInt(document.getElementById('exitTargetPct').value);
+            window.exitTargetPct = exitTargetPct;
             const lotQuantity = parseInt(document.getElementById('lotQuantity').value);
             const lotSize = parseInt(document.getElementById('lotSize').textContent);
             const targetDelta = parseInt(document.getElementById('targetDelta').value);
@@ -2159,17 +2161,17 @@
             if (isClosed) {
                 badge = `<span style="background: #757575; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.6rem; margin-left: 6px;">CLOSED</span>`;
             } else if (exitTriggered) {
-                badge = `<span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.6rem; margin-left: 6px;">50% TARGET</span>`;
+                badge = `<span style="background: #4caf50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 0.6rem; margin-left: 6px;">${window.exitTargetPct}% TARGET</span>`;
             }
 
-            const targetProfit = expiryMaxProfit * 0.5;
+            const targetProfit = expiryMaxProfit * (window.exitTargetPct / 100);
             const maxProfitRow = hasOpenPositions && expiryMaxProfit > 0 ? `
                         <div class="expiry-row">
                             <span style="color: #1976d2; font-weight: 600;">Max Profit</span>
                             <span style="color: #1976d2; font-weight: 600;">₹${expiryMaxProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})} <span style="font-size: 0.6rem; color: #666;">(${profitPct}%)</span></span>
                         </div>
                         <div class="expiry-row" style="border-bottom: 1px solid #eee; padding-bottom: 4px; margin-bottom: 4px;">
-                            <span style="color: #4caf50; font-weight: 600;">Target (50%)</span>
+                            <span style="color: #4caf50; font-weight: 600;">Target (${window.exitTargetPct}%)</span>
                             <span style="color: #4caf50; font-weight: 600;">₹${targetProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})}</span>
                         </div>` : '';
 
@@ -2178,7 +2180,7 @@
                         <div class="expiry-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
                             <button onclick="exitAllPositions('${exp.expiry}')"
                                 style="width: 100%; padding: 6px; background: ${exitTriggered ? '#4caf50' : '#ff5722'}; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-weight: 600;">
-                                ${exitTriggered ? '✓ EXIT ALL (50% reached)' : 'Exit All Positions'}
+                                ${exitTriggered ? '✓ EXIT ALL (' + window.exitTargetPct + '% reached)' : 'Exit All Positions'}
                             </button>
                         </div>` : '';
 
