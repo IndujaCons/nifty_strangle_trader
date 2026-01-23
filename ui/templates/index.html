@@ -1083,7 +1083,7 @@
                 <!-- OI Analysis Section -->
                 <div class="oi-analysis-box" style="background: #fafafa; border-radius: 8px; padding: 12px; margin-bottom: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-weight: 600; font-size: 0.8rem; color: #333;">OI Analysis</span>
+                        <span style="font-weight: 600; font-size: 0.8rem; color: #333;">OI Analysis (<span id="oiExpiry" style="color: #666;">--</span>)</span>
                         <div style="display: flex; align-items: center; gap: 8px;">
                             <select id="oiInterval" onchange="updateOIInterval()" style="padding: 2px 6px; font-size: 0.7rem; border-radius: 4px; border: 1px solid #ddd;">
                                 <option value="5">5 min</option>
@@ -1575,6 +1575,13 @@
                     document.getElementById('lastUpdate').textContent = marketData.timestamp;
                     updateOIAnalysisDisplay(marketData.oi_analysis, marketData.market_status);
 
+                    // Update OI expiry display (format: "27-Jan" from "2026-01-27")
+                    if (marketData.oi_expiry) {
+                        const oiExp = new Date(marketData.oi_expiry);
+                        const oiExpStr = oiExp.getDate() + '-' + oiExp.toLocaleDateString('en-US', { month: 'short' });
+                        document.getElementById('oiExpiry').textContent = oiExpStr;
+                    }
+
                     if (marketData.call) {
                         document.getElementById('callStrike').textContent = marketData.call.strike;
                         document.getElementById('callLtp').textContent = '₹' + marketData.call.ltp?.toFixed(2);
@@ -1896,6 +1903,13 @@
 
                     // OI Analysis
                     updateOIAnalysisDisplay(data.oi_analysis, data.market_status);
+
+                    // Update OI expiry display (format: "27-Jan" from "2026-01-27")
+                    if (data.oi_expiry) {
+                        const oiExp = new Date(data.oi_expiry);
+                        const oiExpStr = oiExp.getDate() + '-' + oiExp.toLocaleDateString('en-US', { month: 'short' });
+                        document.getElementById('oiExpiry').textContent = oiExpStr;
+                    }
 
                     // SIP Alert - show popup if triggered
                     if (data.sip_alert && !sipAlertShownToday) {

@@ -898,8 +898,9 @@ def market_data():
         except Exception as e:
             print(f"Margin calculation error: {e}")
 
-        # Fetch PCR from Zerodha
-        pcr_data = fetch_pcr_from_zerodha(provider, data.expiry)
+        # Fetch PCR from Zerodha - always use nearest expiry for OI tracking (highest liquidity)
+        nearest_expiry = provider.get_expiries()[0]
+        pcr_data = fetch_pcr_from_zerodha(provider, nearest_expiry)
         pcr_value = pcr_data.get("pcr")
 
         # PCR History Manager - SIP alert and auto-save
@@ -961,6 +962,7 @@ def market_data():
             "margin_required": total_margin,
             "pcr": pcr_value,
             "oi_analysis": oi_analysis,
+            "oi_expiry": str(nearest_expiry),
             "sip_alert": sip_alert,
             "signal": {
                 "active": signal_info["signal_active"],
