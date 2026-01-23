@@ -1000,6 +1000,19 @@
                     </div>
 
                     <div class="setting-row">
+                        <label>Auto Exit</label>
+                        <label class="toggle">
+                            <input type="checkbox" id="autoExit" onchange="updateSettings()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="setting-row">
+                        <label>Exit Target %</label>
+                        <input type="number" id="exitTargetPct" min="20" max="95" value="50" onchange="updateSettings()" style="width: 50px;">
+                    </div>
+
+                    <div class="setting-row">
                         <label>Lots per Trade</label>
                         <input type="number" id="lotQuantity" min="1" max="50" value="6" onchange="updateSettings()">
                     </div>
@@ -1016,7 +1029,7 @@
 
                     <div class="setting-row">
                         <label>Target Delta</label>
-                        <input type="number" id="targetDelta" min="5" max="10" value="7" onchange="updateSettings()" style="width: 50px;">
+                        <input type="number" id="targetDelta" min="2" max="50" value="7" onchange="updateSettings()" style="width: 50px;">
                     </div>
 
                     <div class="setting-row">
@@ -1105,7 +1118,7 @@
                         </div>
                     </div>
                     <div id="oiReason" style="margin-top: 8px; font-size: 0.7rem; color: #666; text-align: center; font-style: italic;">
-                        Collecting data...
+                        --
                     </div>
                 </div>
 
@@ -1560,7 +1573,7 @@
                     document.getElementById('straddleVwap').textContent = marketData.straddle_vwap?.toFixed(2) || '--';
                     document.getElementById('pcrValue').textContent = marketData.pcr?.toFixed(2) || '--';
                     document.getElementById('lastUpdate').textContent = marketData.timestamp;
-                    updateOIAnalysisDisplay(marketData.oi_analysis);
+                    updateOIAnalysisDisplay(marketData.oi_analysis, marketData.market_status);
 
                     if (marketData.call) {
                         document.getElementById('callStrike').textContent = marketData.call.strike;
@@ -1652,6 +1665,8 @@
                 .then(data => {
                     document.getElementById('liveTrading').checked = !data.paper_trading;
                     document.getElementById('autoTrade').checked = data.auto_trade || false;
+                    document.getElementById('autoExit').checked = data.auto_exit !== false;  // default true
+                    document.getElementById('exitTargetPct').value = data.exit_target_pct || 50;
                     document.getElementById('lotQuantity').value = data.lot_quantity;
                     document.getElementById('lotSize').textContent = data.lot_size;
                     document.getElementById('totalQty').textContent = data.lot_quantity * data.lot_size;
@@ -1665,6 +1680,8 @@
         function updateSettings() {
             const liveTrading = document.getElementById('liveTrading').checked;
             const autoTrade = document.getElementById('autoTrade').checked;
+            const autoExit = document.getElementById('autoExit').checked;
+            const exitTargetPct = parseInt(document.getElementById('exitTargetPct').value);
             const lotQuantity = parseInt(document.getElementById('lotQuantity').value);
             const lotSize = parseInt(document.getElementById('lotSize').textContent);
             const targetDelta = parseInt(document.getElementById('targetDelta').value);
@@ -1681,6 +1698,8 @@
                 body: JSON.stringify({
                     paper_trading: !liveTrading,
                     auto_trade: autoTrade,
+                    auto_exit: autoExit,
+                    exit_target_pct: exitTargetPct,
                     lot_quantity: lotQuantity,
                     target_delta: targetDelta,
                     decay_threshold: decayThreshold
@@ -1739,15 +1758,22 @@
             refreshMarketData();  // Refresh immediately with new interval
         }
 
-        function updateOIAnalysisDisplay(analysis) {
+        function updateOIAnalysisDisplay(analysis, marketStatus) {
             const signalEl = document.getElementById('oiSignal');
             const reasonEl = document.getElementById('oiReason');
 
-            if (!analysis) {
+            if (!analysis || analysis.error || marketStatus === 'closed' || marketStatus === 'pre-market') {
                 signalEl.textContent = '--';
                 signalEl.style.background = '#e0e0e0';
                 signalEl.style.color = '#666';
-                reasonEl.textContent = 'Collecting data...';
+                // Show appropriate message based on market status
+                if (marketStatus === 'closed') {
+                    reasonEl.textContent = 'Market closed';
+                } else if (marketStatus === 'pre-market') {
+                    reasonEl.textContent = 'Pre-market';
+                } else {
+                    reasonEl.textContent = analysis?.error || 'Collecting data...';
+                }
                 document.getElementById('oiAtmStrike').textContent = '--';
                 document.getElementById('oiAtmStrikePe').textContent = '--';
                 document.getElementById('oiCePrice').textContent = '--';
@@ -1757,7 +1783,7 @@
                 return;
             }
 
-            // Update ATM strike
+            // Update ATM strike (100s rounded)
             document.getElementById('oiAtmStrike').textContent = analysis.atm_strike;
             document.getElementById('oiAtmStrikePe').textContent = analysis.atm_strike;
 
@@ -1866,7 +1892,7 @@
                     }
 
                     // OI Analysis
-                    updateOIAnalysisDisplay(data.oi_analysis);
+                    updateOIAnalysisDisplay(data.oi_analysis, data.market_status);
 
                     // SIP Alert - show popup if triggered
                     if (data.sip_alert && !sipAlertShownToday) {

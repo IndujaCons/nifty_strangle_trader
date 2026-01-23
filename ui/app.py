@@ -49,60 +49,58 @@ pcr_cache = {"pcr": None, "timestamp": 0, "max_pain": None}
 
 # OI Tracker for ATM straddle analysis
 class OITracker:
-    """Track OI and price changes for ATM CE/PE to generate directional signals."""
+    """Track OI and price changes for multiple strikes around ATM to generate directional signals.
+
+    Tracks 3 strikes around 100s ATM (ATM-100, ATM, ATM+100) to maintain OI history
+    even when ATM moves. This prevents losing data on volatile days.
+    """
 
     def __init__(self, max_history_minutes=120):
-        self.history = []  # List of {timestamp, atm_strike, ce_oi, ce_price, pe_oi, pe_price}
+        self.history = {}  # Dict keyed by strike: {25200: [{timestamp, ce_oi, ce_price, pe_oi, pe_price}, ...], ...}
         self.max_history = max_history_minutes * 60  # Convert to seconds
 
-    def add_data(self, atm_strike, ce_oi, ce_price, pe_oi, pe_price):
-        """Add a new data point."""
+    def add_data(self, strike, ce_oi, ce_price, pe_oi, pe_price):
+        """Add data for a specific strike."""
         now = time.time()
-        self.history.append({
+        if strike not in self.history:
+            self.history[strike] = []
+        self.history[strike].append({
             "timestamp": now,
-            "atm_strike": atm_strike,
             "ce_oi": ce_oi,
             "ce_price": ce_price,
             "pe_oi": pe_oi,
             "pe_price": pe_price
         })
-        # Cleanup old data
+        # Cleanup old data for this strike
         cutoff = now - self.max_history
-        self.history = [h for h in self.history if h["timestamp"] > cutoff]
-        print(f"[OI Tracker] Added: ATM={atm_strike}, CE OI={ce_oi:,} @ {ce_price}, PE OI={pe_oi:,} @ {pe_price} (total: {len(self.history)} points)")
+        self.history[strike] = [h for h in self.history[strike] if h["timestamp"] > cutoff]
 
-    def get_analysis(self, interval_minutes=5):
-        """Get OI change analysis for the specified interval."""
-        if len(self.history) < 2:
-            print(f"[OI Analysis] Not enough data: {len(self.history)} points")
-            return None
+    def get_analysis(self, atm_strike, interval_minutes=5):
+        """Get OI change analysis for specific ATM strike (rounded to 100)."""
+        # Round ATM to nearest 100 for stable tracking
+        atm_100 = round(atm_strike / 100) * 100
 
+        if atm_100 not in self.history or len(self.history[atm_100]) < 2:
+            print(f"[OI Analysis] Not enough data for strike {atm_100}: {len(self.history.get(atm_100, []))} points")
+            return {"error": f"Collecting data for ATM {atm_100}..."}
+
+        strike_history = self.history[atm_100]
         now = time.time()
         interval_seconds = interval_minutes * 60
         cutoff = now - interval_seconds
 
         # Find the oldest data point within the interval
         old_data = None
-        for h in self.history:
+        for h in strike_history:
             if h["timestamp"] >= cutoff:
                 old_data = h
                 break
 
         if not old_data:
             # Use oldest available if no data in interval
-            old_data = self.history[0]
+            old_data = strike_history[0]
 
-        current = self.history[-1]
-
-        # If ATM strike changed significantly (>100 pts), try to find matching data
-        # Otherwise proceed with comparison (small ATM changes are acceptable)
-        if abs(old_data["atm_strike"] - current["atm_strike"]) > 100:
-            # Find most recent data with same ATM strike
-            for h in reversed(self.history[:-1]):
-                if h["atm_strike"] == current["atm_strike"]:
-                    old_data = h
-                    break
-            # If no match found, still proceed with available data
+        current = strike_history[-1]
 
         # Calculate changes
         ce_oi_change = current["ce_oi"] - old_data["ce_oi"]
@@ -179,7 +177,7 @@ class OITracker:
             reason = "PE long unwinding"
 
         return {
-            "atm_strike": current["atm_strike"],
+            "atm_strike": atm_100,
             "interval_minutes": interval_minutes,
             "ce_oi_old": old_data["ce_oi"],
             "ce_oi_new": current["ce_oi"],
@@ -323,13 +321,15 @@ def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
             quotes = kite_provider.kite.quote(batch)
             all_quotes.update(quotes)
 
-        # Calculate OI totals and track ATM data for OI analysis
+        # Calculate OI totals and track data for multiple strikes (OI analysis)
         total_ce_oi = 0
         total_pe_oi = 0
-        atm_ce_oi = 0
-        atm_ce_price = 0
-        atm_pe_oi = 0
-        atm_pe_price = 0
+
+        # Round ATM to nearest 100 for OI tracking (more stable, better liquidity)
+        atm_100 = round(atm_strike / 100) * 100
+        # Track 3 strikes: ATM-100, ATM, ATM+100
+        tracked_strikes = [atm_100 - 100, atm_100, atm_100 + 100]
+        strike_data = {s: {"ce_oi": 0, "ce_price": 0, "pe_oi": 0, "pe_price": 0} for s in tracked_strikes}
 
         for opt in relevant_options:
             symbol = f"NFO:{opt['tradingsymbol']}"
@@ -340,36 +340,45 @@ def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
 
             if opt['instrument_type'] == 'CE':
                 total_ce_oi += oi
-                # Track ATM CE
-                if strike == atm_strike:
-                    atm_ce_oi = oi
-                    atm_ce_price = ltp
+                # Track CE for monitored strikes
+                if strike in tracked_strikes:
+                    strike_data[strike]["ce_oi"] = oi
+                    strike_data[strike]["ce_price"] = ltp
             else:
                 total_pe_oi += oi
-                # Track ATM PE
-                if strike == atm_strike:
-                    atm_pe_oi = oi
-                    atm_pe_price = ltp
+                # Track PE for monitored strikes
+                if strike in tracked_strikes:
+                    strike_data[strike]["pe_oi"] = oi
+                    strike_data[strike]["pe_price"] = ltp
 
-        # Update OI tracker with ATM data
-        if atm_ce_oi > 0 and atm_pe_oi > 0:
-            oi_tracker.add_data(atm_strike, atm_ce_oi, atm_ce_price, atm_pe_oi, atm_pe_price)
+        # Update OI tracker for all 3 strikes
+        tracked_count = 0
+        for track_strike in tracked_strikes:
+            data = strike_data[track_strike]
+            if data["ce_oi"] > 0 and data["pe_oi"] > 0:
+                oi_tracker.add_data(track_strike, data["ce_oi"], data["ce_price"], data["pe_oi"], data["pe_price"])
+                tracked_count += 1
+        if tracked_count > 0:
+            print(f"[OI Tracker] Added: Strikes={tracked_strikes[0]}/{tracked_strikes[1]}/{tracked_strikes[2]} (100s ATM={atm_100}, actual ATM={atm_strike})")
 
         # Calculate PCR
         pcr = round(total_pe_oi / total_ce_oi, 2) if total_ce_oi > 0 else 0
 
+        # Use 100s ATM data for cache (more stable reference)
+        atm_100_data = strike_data[atm_100]
         pcr_cache = {
             "pcr": pcr,
             "ce_oi": total_ce_oi,
             "pe_oi": total_pe_oi,
             "atm_strike": atm_strike,
-            "atm_ce_oi": atm_ce_oi,
-            "atm_ce_price": atm_ce_price,
-            "atm_pe_oi": atm_pe_oi,
-            "atm_pe_price": atm_pe_price,
+            "atm_100": atm_100,
+            "atm_ce_oi": atm_100_data["ce_oi"],
+            "atm_ce_price": atm_100_data["ce_price"],
+            "atm_pe_oi": atm_100_data["pe_oi"],
+            "atm_pe_price": atm_100_data["pe_price"],
             "timestamp": time.time()
         }
-        print(f"PCR: {pcr}, ATM: {atm_strike}, CE OI: {atm_ce_oi:,} @ {atm_ce_price}, PE OI: {atm_pe_oi:,} @ {atm_pe_price}")
+        print(f"PCR: {pcr}, 100s ATM: {atm_100} (actual: {atm_strike}), CE OI: {atm_100_data['ce_oi']:,} @ {atm_100_data['ce_price']}, PE OI: {atm_100_data['pe_oi']:,} @ {atm_100_data['pe_price']}")
         return pcr_cache
 
     except Exception as e:
@@ -385,6 +394,8 @@ def get_config():
         "api_key": os.getenv("KITE_API_KEY", ""),
         "paper_trading": os.getenv("PAPER_TRADING", "true").lower() == "true",
         "auto_trade": os.getenv("AUTO_TRADE", "false").lower() == "true",
+        "auto_exit": os.getenv("AUTO_EXIT", "true").lower() == "true",
+        "exit_target_pct": int(float(os.getenv("EXIT_TARGET_PCT", "0.50")) * 100),
         "lot_quantity": int(os.getenv("LOT_QUANTITY", "1")),
         "lot_size": NIFTY_CONFIG["lot_size"],
         "decay_threshold": int(float(os.getenv("MOVE_DECAY_THRESHOLD", "0.60")) * 100),  # As percentage
@@ -572,7 +583,7 @@ def get_expiries():
         except Exception as e:
             print(f"Error getting position expiries: {e}")
 
-        expiries = provider.get_available_expiries(count=2, position_expiries=position_expiries)
+        expiries = provider.get_available_expiries(count=4, min_dte=0, position_expiries=position_expiries)
         return jsonify({"expiries": expiries})
     except Exception as e:
         return jsonify({"expiries": [], "error": str(e)})
@@ -735,9 +746,9 @@ def market_data():
                 except Exception as e:
                     print(f"[Auto-Trade] Entry error: {e}")
 
-        # Auto-exit: Exit positions when 50% profit target is reached (PER EXPIRY)
+        # Auto-exit: Exit positions when profit target is reached (PER EXPIRY)
         # Works for ALL trades (manual or auto) based on actual position data
-        if config.get("auto_trade") and not skip_signal:
+        if config.get("auto_exit") and not skip_signal:
             try:
                 import re
 
@@ -794,10 +805,11 @@ def market_data():
                         if expiry_collected > 0:
                             # Profit = what we collected - what it costs to buy back
                             expiry_profit = expiry_collected - expiry_current_value
-                            profit_target = expiry_collected * 0.5  # 50% of premium collected
+                            exit_pct = float(os.getenv("EXIT_TARGET_PCT", "0.50"))
+                            profit_target = expiry_collected * exit_pct
 
                             if expiry_profit >= profit_target:
-                                print(f"[Auto-Trade] Expiry {expiry_key}: 50% target reached! Profit: {expiry_profit:.2f}, Target: {profit_target:.2f}")
+                                print(f"[Auto-Trade] Expiry {expiry_key}: {int(exit_pct * 100)}% target reached! Profit: {expiry_profit:.2f}, Target: {profit_target:.2f}")
 
                                 orders_placed = []
                                 paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
@@ -915,7 +927,7 @@ def market_data():
 
         # Get OI analysis (default 5 min interval, can be overridden by query param)
         oi_interval = int(request.args.get('oi_interval', 5))
-        oi_analysis = oi_tracker.get_analysis(interval_minutes=oi_interval)
+        oi_analysis = oi_tracker.get_analysis(atm_strike=data.atm_strike, interval_minutes=oi_interval)
 
         last_data = {
             "timestamp": now.strftime("%H:%M:%S"),
@@ -1946,6 +1958,16 @@ def update_settings():
         value = "true" if data["auto_trade"] else "false"
         set_key(str(ENV_FILE), "AUTO_TRADE", value)
         os.environ["AUTO_TRADE"] = value
+
+    if "auto_exit" in data:
+        value = "true" if data["auto_exit"] else "false"
+        set_key(str(ENV_FILE), "AUTO_EXIT", value)
+        os.environ["AUTO_EXIT"] = value
+
+    if "exit_target_pct" in data:
+        value = str(int(data["exit_target_pct"]) / 100)  # 50 → "0.50"
+        set_key(str(ENV_FILE), "EXIT_TARGET_PCT", value)
+        os.environ["EXIT_TARGET_PCT"] = value
 
     if "lot_quantity" in data:
         value = str(int(data["lot_quantity"]))
