@@ -1273,7 +1273,7 @@ def history():
                         calculated_pnl = (current_ltp - avg_price) * quantity
 
                     live_expiry_data[expiry_key]['open'] += calculated_pnl
-                    live_expiry_data[expiry_key]['booked'] += realised
+                    # Note: Don't add 'realised' here - it's already captured in CSV via sync
                     live_expiry_data[expiry_key]['open_positions'] += 1
                     # Max profit for sold options = premium collected = average_price × abs(quantity)
                     if quantity < 0:  # Sold position
