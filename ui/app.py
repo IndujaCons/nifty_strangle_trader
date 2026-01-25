@@ -1078,12 +1078,19 @@ def market_data():
         current_time = now.time()
         baseline_start = datetime.strptime("09:15", "%H:%M").time()
         baseline_end = datetime.strptime("09:20", "%H:%M").time()
+        market_close = datetime.strptime("15:30", "%H:%M").time()
 
-        if baseline_start <= current_time <= baseline_end and not oi_tracker.has_baseline():
+        if not oi_tracker.has_baseline():
             strikes_data = pcr_data.get("strikes_data", {})
             if strikes_data:
-                oi_tracker.set_baseline(strikes_data)
-                print(f"[OI Tracker] 9:15 baseline captured with {len(strikes_data)} strikes")
+                if baseline_start <= current_time <= baseline_end:
+                    # Ideal: capture during 9:15-9:20 window
+                    oi_tracker.set_baseline(strikes_data)
+                    print(f"[OI Tracker] 9:15 baseline captured with {len(strikes_data)} strikes")
+                elif current_time > baseline_end and current_time <= market_close:
+                    # Fallback: app started late, use current data as baseline
+                    oi_tracker.set_baseline(strikes_data)
+                    print(f"[OI Tracker] Late baseline captured at {now.strftime('%H:%M')} with {len(strikes_data)} strikes (app started after 9:20)")
 
         # PCR History Manager - SIP alert and auto-save
         pcr_manager = get_pcr_manager()
