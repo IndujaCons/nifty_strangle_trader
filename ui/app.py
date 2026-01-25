@@ -47,159 +47,169 @@ auto_trade_state = {
 # PCR cache
 pcr_cache = {"pcr": None, "timestamp": 0, "max_pain": None}
 
-# OI Tracker for ATM straddle analysis
+# OI Tracker for 6-strike analysis with 9:15 AM baseline
 class OITracker:
-    """Track OI and price changes for multiple strikes around ATM to generate directional signals.
+    """Track OI changes for 6 strikes around ATM since 9:15 AM market open.
 
-    Tracks 3 strikes around 100s ATM (ATM-100, ATM, ATM+100) to maintain OI history
-    even when ATM moves. This prevents losing data on volatile days.
+    Tracks strikes: ATM-300, ATM-200, ATM-100, ATM, ATM+100, ATM+200 (rounded to 100)
+    Uses fixed 9:15 AM baseline instead of rolling intervals.
     """
 
-    def __init__(self, max_history_minutes=120):
-        self.history = {}  # Dict keyed by strike: {25200: [{timestamp, ce_oi, ce_price, pe_oi, pe_price}, ...], ...}
-        self.max_history = max_history_minutes * 60  # Convert to seconds
+    def __init__(self):
+        self.baseline_snapshot = {}  # {strike: {ce_oi, pe_oi}}
+        self.baseline_time = None
+        self.baseline_date = None  # Track which date the baseline is for
+        self.current_data = {}  # Latest data for each strike
 
-    def add_data(self, strike, ce_oi, ce_price, pe_oi, pe_price):
-        """Add data for a specific strike."""
-        now = time.time()
-        if strike not in self.history:
-            self.history[strike] = []
-        self.history[strike].append({
-            "timestamp": now,
-            "ce_oi": ce_oi,
-            "ce_price": ce_price,
-            "pe_oi": pe_oi,
-            "pe_price": pe_price
-        })
-        # Cleanup old data for this strike
-        cutoff = now - self.max_history
-        self.history[strike] = [h for h in self.history[strike] if h["timestamp"] > cutoff]
+    def set_baseline(self, strikes_data):
+        """Set 9:15 AM baseline - call once at market open."""
+        self.baseline_snapshot = strikes_data.copy()
+        self.baseline_time = datetime.now()
+        self.baseline_date = date.today()
+        print(f"[OI Tracker] Baseline set at {self.baseline_time.strftime('%H:%M:%S')} for {len(strikes_data)} strikes")
 
-    def get_analysis(self, atm_strike, interval_minutes=5):
-        """Get OI change analysis for specific ATM strike (rounded to 100)."""
-        # Round ATM to nearest 100 for stable tracking
+    def update_current(self, strikes_data):
+        """Update current OI data for all tracked strikes."""
+        self.current_data = strikes_data.copy()
+
+    def has_baseline(self):
+        """Check if we have a valid baseline for today."""
+        return self.baseline_date == date.today() and len(self.baseline_snapshot) > 0
+
+    def get_analysis(self, atm_strike):
+        """Get 6-strike OI analysis vs 9:15 baseline."""
+        # Round ATM to nearest 100
         atm_100 = round(atm_strike / 100) * 100
 
-        if atm_100 not in self.history or len(self.history[atm_100]) < 2:
-            print(f"[OI Analysis] Not enough data for strike {atm_100}: {len(self.history.get(atm_100, []))} points")
-            return {"error": f"Collecting data for ATM {atm_100}..."}
+        # Define 6 strikes to track
+        strike_offsets = [-300, -200, -100, 0, 100, 200]
+        tracked_strikes = [atm_100 + offset for offset in strike_offsets]
 
-        strike_history = self.history[atm_100]
-        now = time.time()
-        interval_seconds = interval_minutes * 60
-        cutoff = now - interval_seconds
+        if not self.has_baseline():
+            return {"error": "Waiting for 9:15 AM baseline..."}
 
-        # Find the oldest data point within the interval
-        old_data = None
-        for h in strike_history:
-            if h["timestamp"] >= cutoff:
-                old_data = h
-                break
+        if not self.current_data:
+            return {"error": "No current OI data available"}
 
-        if not old_data:
-            # Use oldest available if no data in interval
-            old_data = strike_history[0]
+        # Build strike analysis
+        strikes_analysis = []
+        total_ce_buildup_above = 0
+        total_pe_buildup_below = 0
+        total_ce_buildup = 0
+        total_pe_buildup = 0
 
-        current = strike_history[-1]
+        for strike in tracked_strikes:
+            baseline = self.baseline_snapshot.get(strike, {})
+            current = self.current_data.get(strike, {})
 
-        # Calculate changes
-        ce_oi_change = current["ce_oi"] - old_data["ce_oi"]
-        pe_oi_change = current["pe_oi"] - old_data["pe_oi"]
-        ce_price_change = current["ce_price"] - old_data["ce_price"]
-        pe_price_change = current["pe_price"] - old_data["pe_price"]
+            if not baseline or not current:
+                # Skip strikes without data
+                continue
 
-        # Calculate percentage changes
-        ce_oi_pct = (ce_oi_change / old_data["ce_oi"] * 100) if old_data["ce_oi"] > 0 else 0
-        pe_oi_pct = (pe_oi_change / old_data["pe_oi"] * 100) if old_data["pe_oi"] > 0 else 0
-        ce_price_pct = (ce_price_change / old_data["ce_price"] * 100) if old_data["ce_price"] > 0 else 0
-        pe_price_pct = (pe_price_change / old_data["pe_price"] * 100) if old_data["pe_price"] > 0 else 0
+            baseline_ce = baseline.get('ce_oi', 0)
+            baseline_pe = baseline.get('pe_oi', 0)
+            current_ce = current.get('ce_oi', 0)
+            current_pe = current.get('pe_oi', 0)
 
-        # Determine signals (10% threshold for significant OI change)
-        oi_threshold = 10
-        ce_oi_up = ce_oi_pct > oi_threshold
-        ce_oi_down = ce_oi_pct < -oi_threshold
-        pe_oi_up = pe_oi_pct > oi_threshold
-        pe_oi_down = pe_oi_pct < -oi_threshold
-        ce_price_up = ce_price_change > 0
-        pe_price_up = pe_price_change > 0
+            ce_chg = current_ce - baseline_ce
+            pe_chg = current_pe - baseline_pe
 
-        # Generate signal based on combinations
-        signal = "NEUTRAL"
-        confidence = "Low"
-        reason = ""
+            ce_pct = (ce_chg / baseline_ce * 100) if baseline_ce > 0 else 0
+            pe_pct = (pe_chg / baseline_pe * 100) if baseline_pe > 0 else 0
 
-        # Strong Bullish: CE price up + OI up, PE price down + OI up (put writing)
-        if ce_price_up and ce_oi_up and not pe_price_up and pe_oi_up:
-            signal = "BULLISH"
-            confidence = "High"
-            reason = "CE longs building + PE writing"
-        # Strong Bearish: CE price down + OI up, PE price up + OI up
-        elif not ce_price_up and ce_oi_up and pe_price_up and pe_oi_up:
-            signal = "BEARISH"
-            confidence = "High"
-            reason = "CE shorts building + PE longs building"
-        # Bullish: CE price up + OI up
-        elif ce_price_up and ce_oi_up:
-            signal = "BULLISH"
-            confidence = "Medium"
-            reason = "New CE longs entering"
-        # Bullish: PE price down + OI up (put writing)
-        elif not pe_price_up and pe_oi_up:
-            signal = "BULLISH"
-            confidence = "Medium"
-            reason = "Put writing (PE shorts)"
-        # Bearish: PE price up + OI up
-        elif pe_price_up and pe_oi_up:
-            signal = "BEARISH"
-            confidence = "Medium"
-            reason = "New PE longs entering"
-        # Bearish: CE price down + OI up (call writing)
-        elif not ce_price_up and ce_oi_up:
-            signal = "BEARISH"
-            confidence = "Medium"
-            reason = "Call writing (CE shorts)"
-        # Mild signals based on unwinding
-        elif ce_price_up and ce_oi_down:
-            signal = "BULLISH"
-            confidence = "Low"
-            reason = "CE short covering"
-        elif pe_price_up and pe_oi_down:
-            signal = "BEARISH"
-            confidence = "Low"
-            reason = "PE short covering"
-        elif not ce_price_up and ce_oi_down:
-            signal = "BEARISH"
-            confidence = "Low"
-            reason = "CE long unwinding"
-        elif not pe_price_up and pe_oi_down:
-            signal = "BULLISH"
-            confidence = "Low"
-            reason = "PE long unwinding"
+            strikes_analysis.append({
+                "strike": strike,
+                "ce_oi": current_ce,
+                "ce_chg": ce_chg,
+                "ce_pct": round(ce_pct, 1),
+                "pe_oi": current_pe,
+                "pe_chg": pe_chg,
+                "pe_pct": round(pe_pct, 1),
+                "is_atm": strike == atm_100
+            })
+
+            # Accumulate for signal calculation
+            total_ce_buildup += ce_chg
+            total_pe_buildup += pe_chg
+            if strike > atm_100:
+                total_ce_buildup_above += ce_chg
+            if strike < atm_100:
+                total_pe_buildup_below += pe_chg
+
+        if not strikes_analysis:
+            return {"error": "No strike data matched baseline"}
+
+        # Calculate signal based on OI buildup patterns
+        signal, confidence, reason, action = self._calculate_signal(
+            total_ce_buildup_above, total_pe_buildup_below,
+            total_ce_buildup, total_pe_buildup
+        )
 
         return {
+            "baseline_time": self.baseline_time.strftime("%H:%M") if self.baseline_time else "N/A",
+            "current_time": datetime.now().strftime("%H:%M"),
             "atm_strike": atm_100,
-            "interval_minutes": interval_minutes,
-            "ce_oi_old": old_data["ce_oi"],
-            "ce_oi_new": current["ce_oi"],
-            "ce_oi_change": ce_oi_change,
-            "ce_oi_pct": round(ce_oi_pct, 1),
-            "ce_price_old": old_data["ce_price"],
-            "ce_price_new": current["ce_price"],
-            "ce_price_change": round(ce_price_change, 2),
-            "ce_price_pct": round(ce_price_pct, 1),
-            "pe_oi_old": old_data["pe_oi"],
-            "pe_oi_new": current["pe_oi"],
-            "pe_oi_change": pe_oi_change,
-            "pe_oi_pct": round(pe_oi_pct, 1),
-            "pe_price_old": old_data["pe_price"],
-            "pe_price_new": current["pe_price"],
-            "pe_price_change": round(pe_price_change, 2),
-            "pe_price_pct": round(pe_price_pct, 1),
+            "strikes": strikes_analysis,
             "signal": signal,
             "confidence": confidence,
             "reason": reason,
-            "data_age_seconds": int(now - old_data["timestamp"])
+            "action": action
         }
+
+    def _calculate_signal(self, ce_above, pe_below, total_ce, total_pe):
+        """Calculate trading signal from OI buildup patterns."""
+        # Thresholds for significant buildup (in contracts)
+        threshold = 500000  # 5 lakh OI change
+
+        signal = "NEUTRAL"
+        confidence = "Low"
+        reason = "No clear pattern"
+        action = "Wait for confirmation"
+
+        # Strong BEARISH: CE writing above ATM (resistance building)
+        if ce_above > threshold and ce_above > abs(pe_below):
+            signal = "BEARISH"
+            if ce_above > threshold * 2:
+                confidence = "High"
+                reason = "Massive CE writing above ATM = Strong resistance"
+                action = "Exit PE shorts, hold CE shorts"
+            else:
+                confidence = "Medium"
+                reason = "CE writing above ATM = Resistance"
+                action = "Be cautious on PE shorts"
+
+        # Strong BULLISH: PE writing below ATM (support building)
+        elif pe_below > threshold and pe_below > abs(ce_above):
+            signal = "BULLISH"
+            if pe_below > threshold * 2:
+                confidence = "High"
+                reason = "Massive PE writing below ATM = Strong support"
+                action = "Exit CE shorts, hold PE shorts"
+            else:
+                confidence = "Medium"
+                reason = "PE writing below ATM = Support"
+                action = "Be cautious on CE shorts"
+
+        # Mixed signals
+        elif ce_above > threshold / 2 and pe_below > threshold / 2:
+            signal = "RANGEBOUND"
+            confidence = "Medium"
+            reason = "Both CE & PE writing = Range formation"
+            action = "Hold straddle, expect range"
+
+        # Unwinding patterns
+        elif total_ce < -threshold:
+            signal = "BULLISH"
+            confidence = "Low"
+            reason = "CE unwinding = Bears exiting"
+            action = "Watch for breakout"
+        elif total_pe < -threshold:
+            signal = "BEARISH"
+            confidence = "Low"
+            reason = "PE unwinding = Bulls exiting"
+            action = "Watch for breakdown"
+
+        return signal, confidence, reason, action
 
 oi_tracker = OITracker()
 
@@ -321,15 +331,15 @@ def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
             quotes = kite_provider.kite.quote(batch)
             all_quotes.update(quotes)
 
-        # Calculate OI totals and track data for multiple strikes (OI analysis)
+        # Calculate OI totals and track data for 6 strikes around ATM (OI analysis)
         total_ce_oi = 0
         total_pe_oi = 0
 
         # Round ATM to nearest 100 for OI tracking (more stable, better liquidity)
         atm_100 = round(atm_strike / 100) * 100
-        # Track 3 strikes: ATM-100, ATM, ATM+100
-        tracked_strikes = [atm_100 - 100, atm_100, atm_100 + 100]
-        strike_data = {s: {"ce_oi": 0, "ce_price": 0, "pe_oi": 0, "pe_price": 0} for s in tracked_strikes}
+        # Track 6 strikes: ATM-300, ATM-200, ATM-100, ATM, ATM+100, ATM+200
+        tracked_strikes = [atm_100 - 300, atm_100 - 200, atm_100 - 100, atm_100, atm_100 + 100, atm_100 + 200]
+        strike_data = {s: {"ce_oi": 0, "pe_oi": 0} for s in tracked_strikes}
 
         for opt in relevant_options:
             symbol = f"NFO:{opt['tradingsymbol']}"
@@ -343,29 +353,23 @@ def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
                 # Track CE for monitored strikes
                 if strike in tracked_strikes:
                     strike_data[strike]["ce_oi"] = oi
-                    strike_data[strike]["ce_price"] = ltp
             else:
                 total_pe_oi += oi
                 # Track PE for monitored strikes
                 if strike in tracked_strikes:
                     strike_data[strike]["pe_oi"] = oi
-                    strike_data[strike]["pe_price"] = ltp
 
-        # Update OI tracker for all 3 strikes
-        tracked_count = 0
-        for track_strike in tracked_strikes:
-            data = strike_data[track_strike]
-            if data["ce_oi"] > 0 and data["pe_oi"] > 0:
-                oi_tracker.add_data(track_strike, data["ce_oi"], data["ce_price"], data["pe_oi"], data["pe_price"])
-                tracked_count += 1
-        if tracked_count > 0:
-            print(f"[OI Tracker] Added: Strikes={tracked_strikes[0]}/{tracked_strikes[1]}/{tracked_strikes[2]} (100s ATM={atm_100}, actual ATM={atm_strike})")
+        # Update OI tracker with current 6-strike data
+        valid_strikes = {s: d for s, d in strike_data.items() if d["ce_oi"] > 0 and d["pe_oi"] > 0}
+        if valid_strikes:
+            oi_tracker.update_current(valid_strikes)
+            print(f"[OI Tracker] Updated {len(valid_strikes)} strikes (ATM={atm_100})")
 
         # Calculate PCR
         pcr = round(total_pe_oi / total_ce_oi, 2) if total_ce_oi > 0 else 0
 
         # Use 100s ATM data for cache (more stable reference)
-        atm_100_data = strike_data[atm_100]
+        atm_100_data = strike_data.get(atm_100, {"ce_oi": 0, "pe_oi": 0})
         pcr_cache = {
             "pcr": pcr,
             "ce_oi": total_ce_oi,
@@ -373,12 +377,11 @@ def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
             "atm_strike": atm_strike,
             "atm_100": atm_100,
             "atm_ce_oi": atm_100_data["ce_oi"],
-            "atm_ce_price": atm_100_data["ce_price"],
             "atm_pe_oi": atm_100_data["pe_oi"],
-            "atm_pe_price": atm_100_data["pe_price"],
+            "strikes_data": valid_strikes,  # Include 6-strike data for baseline capture
             "timestamp": time.time()
         }
-        print(f"PCR: {pcr}, 100s ATM: {atm_100} (actual: {atm_strike}), CE OI: {atm_100_data['ce_oi']:,} @ {atm_100_data['ce_price']}, PE OI: {atm_100_data['pe_oi']:,} @ {atm_100_data['pe_price']}")
+        print(f"PCR: {pcr}, 100s ATM: {atm_100} (actual: {atm_strike}), CE OI: {atm_100_data['ce_oi']:,}, PE OI: {atm_100_data['pe_oi']:,}")
         return pcr_cache
 
     except Exception as e:
@@ -395,6 +398,7 @@ def get_config():
         "paper_trading": os.getenv("PAPER_TRADING", "true").lower() == "true",
         "auto_trade": os.getenv("AUTO_TRADE", "false").lower() == "true",
         "auto_exit": os.getenv("AUTO_EXIT", "true").lower() == "true",
+        "auto_move": os.getenv("AUTO_MOVE", "false").lower() == "true",
         "exit_target_pct": int(float(os.getenv("EXIT_TARGET_PCT", "0.50")) * 100),
         "lot_quantity": int(os.getenv("LOT_QUANTITY", "1")),
         "lot_size": NIFTY_CONFIG["lot_size"],
@@ -847,6 +851,173 @@ def market_data():
             except Exception as e:
                 print(f"[Auto-Trade] Exit check error: {e}")
 
+        # Auto-move: Move decayed positions to target delta strike
+        # Timing: 9:30 AM to 3:15 PM only (same as trading windows)
+        move_window_start = datetime.strptime("09:30", "%H:%M").time()
+        move_window_end = datetime.strptime("15:15", "%H:%M").time()
+        in_move_window = move_window_start <= current_time <= move_window_end
+
+        if config.get("auto_move") and not skip_signal and in_move_window:
+            try:
+                import re
+                from greeks.black_scholes import BlackScholesCalculator
+
+                # Get current positions
+                positions = provider.kite.positions()
+                net_positions = positions.get('net', [])
+
+                # Filter NIFTY options with open short positions
+                nifty_shorts = [p for p in net_positions
+                               if p['tradingsymbol'].startswith('NIFTY') and p['quantity'] < 0]
+
+                if nifty_shorts:
+                    target_delta = float(os.getenv("TARGET_DELTA", "0.07"))
+                    decay_threshold = float(os.getenv("MOVE_DECAY_THRESHOLD", "0.60"))
+                    move_trigger_delta = target_delta * decay_threshold  # e.g., 0.07 * 0.60 = 0.042
+
+                    # Get spot price
+                    spot_quote = provider.kite.quote(["NSE:NIFTY 50"])
+                    spot = spot_quote.get("NSE:NIFTY 50", {}).get("last_price", 0)
+
+                    bs = BlackScholesCalculator(risk_free_rate=0.07, dividend_yield=0.0)
+
+                    # Track which positions we've moved today to avoid duplicate moves
+                    today = date.today()
+                    moved_positions = auto_trade_state.get("moved_positions_today", set())
+                    if auto_trade_state.get("last_move_date") != today:
+                        moved_positions = set()
+                        auto_trade_state["moved_positions_today"] = moved_positions
+
+                    for pos in nifty_shorts:
+                        symbol = pos['tradingsymbol']
+
+                        # Skip if already moved today
+                        if symbol in moved_positions:
+                            continue
+
+                        # Parse symbol to get strike, expiry, option type
+                        match = re.match(r'NIFTY(\d{2}[A-Z]{3})(\d{5,})(CE|PE)', symbol)
+                        if not match:
+                            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d{5,})(CE|PE)', symbol)
+                        if not match:
+                            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
+                        if not match:
+                            continue
+
+                        expiry_code = match.group(1)
+                        strike = int(match.group(2))
+                        option_type = match.group(3)
+
+                        # Parse expiry date
+                        import calendar
+                        month_name_map = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                                         'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+                        month_char_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
+                                         '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
+
+                        try:
+                            if len(expiry_code) == 7 and expiry_code[2:5].isalpha():
+                                yy = int(expiry_code[:2])
+                                mm = month_name_map.get(expiry_code[2:5].upper(), 1)
+                                dd = int(expiry_code[5:7])
+                                expiry_date = date(2000 + yy, mm, dd)
+                            elif len(expiry_code) == 5 and expiry_code[2:5].isalpha():
+                                yy = int(expiry_code[:2])
+                                mm = month_name_map.get(expiry_code[2:5].upper(), 1)
+                                last_day = calendar.monthrange(2000 + yy, mm)[1]
+                                d = date(2000 + yy, mm, last_day)
+                                while d.weekday() != 1:
+                                    d = d.replace(day=d.day - 1)
+                                expiry_date = d
+                            elif len(expiry_code) == 5:
+                                yy = int(expiry_code[:2])
+                                month_char = expiry_code[2]
+                                dd = int(expiry_code[3:5])
+                                mm = month_char_map.get(month_char, int(month_char) if month_char.isdigit() else 1)
+                                expiry_date = date(2000 + yy, mm, dd)
+                            else:
+                                continue
+                        except:
+                            continue
+
+                        # Calculate current delta
+                        ltp = pos.get('last_price', 0)
+                        days_to_expiry = (expiry_date - today).days
+                        time_to_expiry = max(days_to_expiry, 1) / 365.0
+                        synthetic_futures = spot * 1.001
+
+                        try:
+                            iv = bs.calculate_implied_volatility(
+                                S=synthetic_futures, K=strike, T=time_to_expiry,
+                                market_price=ltp, option_type=option_type
+                            )
+                            if option_type == "CE":
+                                current_delta = abs(bs.calculate_call_delta(synthetic_futures, strike, time_to_expiry, iv))
+                            else:
+                                current_delta = abs(bs.calculate_put_delta(synthetic_futures, strike, time_to_expiry, iv))
+                        except:
+                            continue
+
+                        # Check if delta has decayed below threshold
+                        if current_delta < move_trigger_delta:
+                            print(f"[Auto-Move] {symbol}: Delta {current_delta:.4f} < trigger {move_trigger_delta:.4f}")
+
+                            # Get target delta strike
+                            strangle_data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
+                            if not strangle_data:
+                                continue
+
+                            new_strike = strangle_data.call_strike if option_type == "CE" else strangle_data.put_strike
+
+                            # Skip if already at or near target strike
+                            if abs(new_strike - strike) < 100:
+                                continue
+
+                            new_symbol = provider.get_trading_symbol(expiry_date, new_strike, option_type)
+                            if not new_symbol:
+                                continue
+
+                            qty = abs(pos['quantity'])
+                            paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
+
+                            if paper_trading:
+                                print(f"[Auto-Move] PAPER: Would move {symbol} -> {new_symbol} (qty: {qty})")
+                                moved_positions.add(symbol)
+                            else:
+                                try:
+                                    # Square off old position (buy back)
+                                    buy_order = provider.kite.place_order(
+                                        variety="regular",
+                                        exchange="NFO",
+                                        tradingsymbol=symbol,
+                                        transaction_type="BUY",
+                                        quantity=qty,
+                                        order_type="MARKET",
+                                        product="NRML"
+                                    )
+                                    # Sell new position
+                                    sell_order = provider.kite.place_order(
+                                        variety="regular",
+                                        exchange="NFO",
+                                        tradingsymbol=new_symbol,
+                                        transaction_type="SELL",
+                                        quantity=qty,
+                                        order_type="MARKET",
+                                        product="NRML"
+                                    )
+                                    print(f"[Auto-Move] Moved {symbol} -> {new_symbol}: Buy #{buy_order}, Sell #{sell_order}")
+                                    moved_positions.add(symbol)
+                                except Exception as order_e:
+                                    print(f"[Auto-Move] Order error for {symbol}: {order_e}")
+
+                            auto_trade_state["last_move_date"] = today
+                            auto_trade_state["moved_positions_today"] = moved_positions
+
+            except Exception as e:
+                print(f"[Auto-Move] Error: {e}")
+                import traceback
+                traceback.print_exc()
+
         # Calculate margin required using Kite's margins API
         total_margin = 0
         try:
@@ -903,6 +1074,17 @@ def market_data():
         pcr_data = fetch_pcr_from_zerodha(provider, nearest_expiry)
         pcr_value = pcr_data.get("pcr")
 
+        # Auto-capture 9:15 AM baseline for OI analysis
+        current_time = now.time()
+        baseline_start = datetime.strptime("09:15", "%H:%M").time()
+        baseline_end = datetime.strptime("09:20", "%H:%M").time()
+
+        if baseline_start <= current_time <= baseline_end and not oi_tracker.has_baseline():
+            strikes_data = pcr_data.get("strikes_data", {})
+            if strikes_data:
+                oi_tracker.set_baseline(strikes_data)
+                print(f"[OI Tracker] 9:15 baseline captured with {len(strikes_data)} strikes")
+
         # PCR History Manager - SIP alert and auto-save
         pcr_manager = get_pcr_manager()
         current_time_str = now.strftime("%H:%M")
@@ -926,9 +1108,8 @@ def market_data():
                 if saved:
                     print(f"PCR saved to history: {pcr_value}")
 
-        # Get OI analysis (default 5 min interval, can be overridden by query param)
-        oi_interval = int(request.args.get('oi_interval', 5))
-        oi_analysis = oi_tracker.get_analysis(atm_strike=data.atm_strike, interval_minutes=oi_interval)
+        # Get OI analysis (6-strike table with 9:15 baseline)
+        oi_analysis = oi_tracker.get_analysis(atm_strike=data.atm_strike)
 
         last_data = {
             "timestamp": now.strftime("%H:%M:%S"),
@@ -1965,6 +2146,11 @@ def update_settings():
         value = "true" if data["auto_exit"] else "false"
         set_key(str(ENV_FILE), "AUTO_EXIT", value)
         os.environ["AUTO_EXIT"] = value
+
+    if "auto_move" in data:
+        value = "true" if data["auto_move"] else "false"
+        set_key(str(ENV_FILE), "AUTO_MOVE", value)
+        os.environ["AUTO_MOVE"] = value
 
     if "exit_target_pct" in data:
         value = str(int(data["exit_target_pct"]) / 100)  # 50 → "0.50"
