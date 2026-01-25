@@ -166,12 +166,25 @@ class KiteDataProvider:
         # Otherwise use next expiry if available (for fresh entries)
         return expiries[1] if len(expiries) > 1 else nearest
 
+    def _is_monthly_expiry(self, exp_date: date) -> bool:
+        """Check if an expiry is a monthly expiry (last Tuesday of the month)."""
+        import calendar
+        year, month = exp_date.year, exp_date.month
+        # Find last day of month
+        last_day = calendar.monthrange(year, month)[1]
+        # Find last Tuesday (weekday 1)
+        d = date(year, month, last_day)
+        while d.weekday() != 1:  # Tuesday
+            d = d - timedelta(days=1)
+        return exp_date == d
+
     def get_available_expiries(self, count: int = 2, min_dte: int = 3, position_expiries: List[date] = None) -> List[dict]:
         """
         Get the nearest N expiries with their DTE for dropdown selection.
+        Also includes at least 2 monthly expiries (current month and next month).
 
         Args:
-            count: Number of expiries to return
+            count: Number of weekly expiries to return
             min_dte: Minimum DTE to include (skip very near-term expiries)
             position_expiries: List of expiries that have open positions (always include these)
 
@@ -182,21 +195,64 @@ class KiteDataProvider:
         position_expiries = position_expiries or []
 
         result = []
+        weekly_count = 0
+        monthly_expiries_added = []
+
         for exp in expiries:
             dte = (exp - today).days
-            # Include if: has open positions OR (DTE >= min_dte AND haven't reached count yet)
             has_positions = exp in position_expiries
-            if has_positions or (dte >= min_dte and len(result) < count):
+            is_monthly = self._is_monthly_expiry(exp)
+
+            # Always include if has open positions
+            if has_positions:
+                label_suffix = " [M]" if is_monthly else ""
                 result.append({
                     'expiry': exp.isoformat(),
                     'dte': dte,
-                    'label': f"{exp.strftime('%d-%b-%Y')} ({dte} DTE)"
+                    'label': f"{exp.strftime('%d-%b-%Y')} ({dte} DTE){label_suffix}"
                 })
-            # Stop if we have enough expiries (but always include position expiries)
-            if len(result) >= count and not any(pe not in [date.fromisoformat(r['expiry']) for r in result] for pe in position_expiries):
-                break
+                if is_monthly:
+                    monthly_expiries_added.append(exp)
+                continue
 
-        return result[:count + len(position_expiries)]  # Allow extra for position expiries
+            # Include weekly expiries up to count
+            if dte >= min_dte and weekly_count < count:
+                label_suffix = " [M]" if is_monthly else ""
+                result.append({
+                    'expiry': exp.isoformat(),
+                    'dte': dte,
+                    'label': f"{exp.strftime('%d-%b-%Y')} ({dte} DTE){label_suffix}"
+                })
+                weekly_count += 1
+                if is_monthly:
+                    monthly_expiries_added.append(exp)
+
+        # Ensure at least 2 monthly expiries are included
+        monthly_needed = 2 - len(monthly_expiries_added)
+        if monthly_needed > 0:
+            for exp in expiries:
+                if self._is_monthly_expiry(exp) and exp not in monthly_expiries_added:
+                    dte = (exp - today).days
+                    if dte >= 0:  # Don't include past expiries
+                        result.append({
+                            'expiry': exp.isoformat(),
+                            'dte': dte,
+                            'label': f"{exp.strftime('%d-%b-%Y')} ({dte} DTE) [M]"
+                        })
+                        monthly_expiries_added.append(exp)
+                        monthly_needed -= 1
+                        if monthly_needed <= 0:
+                            break
+
+        # Sort by expiry date and remove duplicates
+        seen = set()
+        unique_result = []
+        for item in sorted(result, key=lambda x: x['expiry']):
+            if item['expiry'] not in seen:
+                seen.add(item['expiry'])
+                unique_result.append(item)
+
+        return unique_result
 
     def get_spot_price(self) -> float:
         """Get current NIFTY spot price."""
