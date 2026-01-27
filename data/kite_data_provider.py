@@ -412,7 +412,7 @@ class KiteDataProvider:
         vwap = self.calculate_rolling_vwap(expiry)
 
         # Calculate IV and delta for all options
-        T = dte / 365.0
+        T = max(dte, 0.5) / 365.0  # Minimum half day for 0 DTE
         analyzed = []
         skipped_puts_no_ltp = []
 

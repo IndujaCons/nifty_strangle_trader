@@ -1879,6 +1879,17 @@
                 .then(data => {
                     if (data.error) {
                         console.log('Market data error:', data.error);
+                        // Clear stale data on error
+                        document.getElementById('straddlePrice').textContent = '--';
+                        document.getElementById('straddleVwap').textContent = '--';
+                        document.getElementById('callStrike').textContent = '--';
+                        document.getElementById('callLtp').textContent = '--';
+                        document.getElementById('putStrike').textContent = '--';
+                        document.getElementById('putLtp').textContent = '--';
+                        document.getElementById('pcrValue').textContent = '--';
+                        document.getElementById('vwapDiff').textContent = '--';
+                        document.getElementById('oiExpiry').textContent = '--';
+                        updateOIAnalysisDisplay(null, 'error');
                         return;
                     }
 
