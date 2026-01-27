@@ -873,7 +873,6 @@ def market_data():
                 if nifty_shorts:
                     target_delta = float(os.getenv("TARGET_DELTA", "0.07"))
                     decay_threshold = float(os.getenv("MOVE_DECAY_THRESHOLD", "0.60"))
-                    move_trigger_delta = target_delta * decay_threshold  # e.g., 0.07 * 0.60 = 0.042
 
                     # Get spot price
                     spot_quote = provider.kite.quote(["NSE:NIFTY 50"])
@@ -958,9 +957,15 @@ def market_data():
                         except:
                             continue
 
-                        # Check if delta has decayed below threshold
-                        if current_delta < move_trigger_delta:
-                            print(f"[Auto-Move] {symbol}: Delta {current_delta:.4f} < trigger {move_trigger_delta:.4f}")
+                        # Check if price has decayed by threshold percentage
+                        avg_price = pos.get('average_price', 0)
+                        if avg_price > 0:
+                            profit_pct = (avg_price - ltp) / avg_price
+                        else:
+                            profit_pct = 0
+
+                        if profit_pct >= decay_threshold:
+                            print(f"[Auto-Move] {symbol}: Price decay {profit_pct:.1%} >= threshold {decay_threshold:.0%} (avg: {avg_price:.2f}, ltp: {ltp:.2f})")
 
                             # Get target delta strike
                             strangle_data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
