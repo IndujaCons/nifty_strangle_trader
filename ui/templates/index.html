@@ -1016,6 +1016,14 @@
                     </div>
 
                     <div class="setting-row">
+                        <label>Auto Hedge</label>
+                        <label class="toggle">
+                            <input type="checkbox" id="autoHedge" onchange="updateSettings()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="setting-row">
                         <label>Exit Target %</label>
                         <input type="number" id="exitTargetPct" min="20" max="95" value="50" onchange="updateSettings()" style="width: 50px;">
                     </div>
@@ -1668,6 +1676,7 @@
                     document.getElementById('autoTrade').checked = data.auto_trade || false;
                     document.getElementById('autoExit').checked = data.auto_exit !== false;  // default true
                     document.getElementById('autoMove').checked = data.auto_move || false;
+                    document.getElementById('autoHedge').checked = data.auto_hedge || false;
                     document.getElementById('exitTargetPct').value = data.exit_target_pct || 50;
                     window.exitTargetPct = data.exit_target_pct || 50;
                     document.getElementById('lotQuantity').value = data.lot_quantity;
@@ -1685,6 +1694,7 @@
             const autoTrade = document.getElementById('autoTrade').checked;
             const autoExit = document.getElementById('autoExit').checked;
             const autoMove = document.getElementById('autoMove').checked;
+            const autoHedge = document.getElementById('autoHedge').checked;
             const exitTargetPct = parseInt(document.getElementById('exitTargetPct').value);
             window.exitTargetPct = exitTargetPct;
             refreshHistory();  // Re-render history with new target %
@@ -1706,6 +1716,7 @@
                     auto_trade: autoTrade,
                     auto_exit: autoExit,
                     auto_move: autoMove,
+                    auto_hedge: autoHedge,
                     exit_target_pct: exitTargetPct,
                     lot_quantity: lotQuantity,
                     target_delta: targetDelta,
@@ -2153,7 +2164,12 @@
 
             // Separate open and closed expiries
             const openExpiries = data.by_expiry.filter(exp => exp.status === 'open');
-            const closedExpiries = data.by_expiry.filter(exp => exp.status === 'closed');
+            const closedExpiries = data.by_expiry.filter(exp => exp.status === 'closed')
+                .sort((a, b) => {
+                    const [da, ma, ya] = a.expiry.split('-').map(Number);
+                    const [db, mb, yb] = b.expiry.split('-').map(Number);
+                    return new Date(yb, mb - 1, db) - new Date(ya, ma - 1, da);
+                });
 
             let html = '';
 

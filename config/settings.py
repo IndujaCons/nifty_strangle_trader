@@ -49,6 +49,7 @@ STRATEGY_CONFIG = {
     # Exit Rules
     "profit_target_pct": 0.50,   # Exit at 50% of max profit
     "move_decay_threshold": float(os.getenv("MOVE_DECAY_THRESHOLD", "0.60")),  # Move position when decayed > 60%
+    "hedge_loss_threshold": float(os.getenv("HEDGE_LOSS_THRESHOLD", "3.0")),  # Add hedge when losing leg LTP >= 3x entry
 
     # Entry Condition
     "entry_signal": "straddle_gt_vwap",  # Enter when straddle > VWAP

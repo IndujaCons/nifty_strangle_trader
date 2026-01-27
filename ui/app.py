@@ -42,6 +42,7 @@ auto_trade_state = {
     "last_exit_date": None,       # Date of last auto-exit
     "last_exit_expiry": None,     # Expiry of last auto-exit
     "entry_premium": 0,           # Premium collected at entry (for 50% target)
+    "hedged_positions": set(),    # Losing leg symbols that have been hedged (never resets)
 }
 
 # PCR cache
@@ -399,6 +400,8 @@ def get_config():
         "auto_trade": os.getenv("AUTO_TRADE", "false").lower() == "true",
         "auto_exit": os.getenv("AUTO_EXIT", "true").lower() == "true",
         "auto_move": os.getenv("AUTO_MOVE", "false").lower() == "true",
+        "auto_hedge": os.getenv("AUTO_HEDGE", "false").lower() == "true",
+        "hedge_loss_threshold": float(os.getenv("HEDGE_LOSS_THRESHOLD", "3.0")),
         "exit_target_pct": int(float(os.getenv("EXIT_TARGET_PCT", "0.50")) * 100),
         "lot_quantity": int(os.getenv("LOT_QUANTITY", "1")),
         "lot_size": NIFTY_CONFIG["lot_size"],
@@ -772,7 +775,7 @@ def market_data():
                     for pos in nifty_positions:
                         symbol = pos['tradingsymbol']
                         # Extract expiry pattern from symbol (e.g., "25120" or "25JAN")
-                        match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2}|\d{2}[A-Z]{3})', symbol)
+                        match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2}|\d{2}[A-Z0-9]\d{2}|\d{2}[A-Z]{3})', symbol)
                         if match:
                             expiry_key = match.group(1)
                             if expiry_key not in expiry_groups:
@@ -1020,6 +1023,134 @@ def market_data():
 
             except Exception as e:
                 print(f"[Auto-Move] Error: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Auto-hedge: Sell extra leg on winning side when losing leg blows up
+        if config.get("auto_hedge") and not skip_signal and in_move_window:
+            try:
+                import re
+                from greeks.black_scholes import BlackScholesCalculator
+                from collections import defaultdict
+
+                positions = provider.kite.positions()
+                net_positions = positions.get('net', [])
+                nifty_shorts = [p for p in net_positions
+                               if p['tradingsymbol'].startswith('NIFTY') and p['quantity'] < 0]
+
+                if nifty_shorts:
+                    hedge_threshold = float(os.getenv("HEDGE_LOSS_THRESHOLD", "3.0"))
+                    target_delta = float(os.getenv("TARGET_DELTA", "0.07"))
+                    hedged_positions = auto_trade_state.get("hedged_positions", set())
+                    lot_quantity = int(os.getenv("LOT_QUANTITY", "1"))
+                    lot_size = NIFTY_CONFIG["lot_size"]
+                    qty = lot_size * lot_quantity
+                    today = date.today()
+
+                    # Group positions by expiry code to find CE/PE pairs
+                    expiry_groups = defaultdict(list)
+                    for pos in nifty_shorts:
+                        symbol = pos['tradingsymbol']
+                        match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2}|\d{2}[A-Z]{3}|\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
+                        if match:
+                            expiry_groups[match.group(1)].append(pos)
+
+                    for expiry_code, group_positions in expiry_groups.items():
+                        for pos in group_positions:
+                            symbol = pos['tradingsymbol']
+
+                            # Skip if this losing leg was already hedged (permanent)
+                            if symbol in hedged_positions:
+                                continue
+
+                            avg_price = pos.get('average_price', 0)
+                            ltp = pos.get('last_price', 0)
+                            if avg_price <= 0:
+                                continue
+
+                            loss_ratio = ltp / avg_price
+                            if loss_ratio < hedge_threshold:
+                                continue
+
+                            # This leg is losing — parse its type
+                            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2}|\d{2}[A-Z]{3}|\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
+                            if not match:
+                                continue
+                            exp_code = match.group(1)
+                            option_type = match.group(3)
+                            winning_type = "PE" if option_type == "CE" else "CE"
+
+                            # Parse expiry date (same logic as auto-move)
+                            import calendar
+                            month_name_map = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                                             'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+                            month_char_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
+                                             '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
+                            try:
+                                if len(exp_code) == 7 and exp_code[2:5].isalpha():
+                                    yy = int(exp_code[:2])
+                                    mm = month_name_map.get(exp_code[2:5].upper(), 1)
+                                    dd = int(exp_code[5:7])
+                                    expiry_date = date(2000 + yy, mm, dd)
+                                elif len(exp_code) == 5 and exp_code[2:5].isalpha():
+                                    yy = int(exp_code[:2])
+                                    mm = month_name_map.get(exp_code[2:5].upper(), 1)
+                                    last_day = calendar.monthrange(2000 + yy, mm)[1]
+                                    d = date(2000 + yy, mm, last_day)
+                                    while d.weekday() != 1:
+                                        d = d.replace(day=d.day - 1)
+                                    expiry_date = d
+                                elif len(exp_code) == 5:
+                                    yy = int(exp_code[:2])
+                                    month_char = exp_code[2]
+                                    dd = int(exp_code[3:5])
+                                    mm = month_char_map.get(month_char, int(month_char) if month_char.isdigit() else 1)
+                                    expiry_date = date(2000 + yy, mm, dd)
+                                else:
+                                    continue
+                            except:
+                                continue
+
+                            print(f"[Auto-Hedge] {symbol}: Loss ratio {loss_ratio:.1f}x >= {hedge_threshold:.1f}x threshold (avg: {avg_price:.2f}, ltp: {ltp:.2f})")
+                            print(f"[Auto-Hedge] Selling extra {winning_type} leg on winning side for expiry {expiry_date}")
+
+                            # Find target delta strike on winning side
+                            strangle_data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
+                            if not strangle_data:
+                                print(f"[Auto-Hedge] Could not find strangle data for {expiry_date}")
+                                continue
+
+                            new_strike = strangle_data.call_strike if winning_type == "CE" else strangle_data.put_strike
+                            new_symbol = provider.get_trading_symbol(expiry_date, new_strike, winning_type)
+                            if not new_symbol:
+                                print(f"[Auto-Hedge] Could not get trading symbol for {new_strike} {winning_type}")
+                                continue
+
+                            paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
+
+                            if paper_trading:
+                                print(f"[Auto-Hedge] PAPER: Would sell {new_symbol} ({lot_quantity} lot(s) = {qty} qty) to hedge losing {symbol}")
+                                hedged_positions.add(symbol)
+                            else:
+                                try:
+                                    order_id = provider.kite.place_order(
+                                        variety="regular",
+                                        exchange="NFO",
+                                        tradingsymbol=new_symbol,
+                                        transaction_type="SELL",
+                                        quantity=qty,
+                                        order_type="MARKET",
+                                        product="NRML"
+                                    )
+                                    print(f"[Auto-Hedge] Sold {new_symbol} (order #{order_id}) to hedge losing {symbol}")
+                                    hedged_positions.add(symbol)
+                                except Exception as order_e:
+                                    print(f"[Auto-Hedge] Order error: {order_e}")
+
+                            auto_trade_state["hedged_positions"] = hedged_positions
+
+            except Exception as e:
+                print(f"[Auto-Hedge] Error: {e}")
                 import traceback
                 traceback.print_exc()
 
@@ -2163,6 +2294,11 @@ def update_settings():
         value = "true" if data["auto_move"] else "false"
         set_key(str(ENV_FILE), "AUTO_MOVE", value)
         os.environ["AUTO_MOVE"] = value
+
+    if "auto_hedge" in data:
+        value = "true" if data["auto_hedge"] else "false"
+        set_key(str(ENV_FILE), "AUTO_HEDGE", value)
+        os.environ["AUTO_HEDGE"] = value
 
     if "exit_target_pct" in data:
         value = str(int(data["exit_target_pct"]) / 100)  # 50 → "0.50"
