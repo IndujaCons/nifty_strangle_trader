@@ -2300,6 +2300,11 @@ def update_settings():
         set_key(str(ENV_FILE), "AUTO_HEDGE", value)
         os.environ["AUTO_HEDGE"] = value
 
+    if "hedge_threshold" in data:
+        value = str(float(data["hedge_threshold"]))
+        set_key(str(ENV_FILE), "HEDGE_LOSS_THRESHOLD", value)
+        os.environ["HEDGE_LOSS_THRESHOLD"] = value
+
     if "exit_target_pct" in data:
         value = str(int(data["exit_target_pct"]) / 100)  # 50 → "0.50"
         set_key(str(ENV_FILE), "EXIT_TARGET_PCT", value)

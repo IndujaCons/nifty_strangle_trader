@@ -1024,6 +1024,11 @@
                     </div>
 
                     <div class="setting-row">
+                        <label>Hedge Threshold x</label>
+                        <input type="number" id="hedgeThreshold" min="1.5" max="10" step="0.5" value="3.0" onchange="updateSettings()" style="width: 50px;">
+                    </div>
+
+                    <div class="setting-row">
                         <label>Exit Target %</label>
                         <input type="number" id="exitTargetPct" min="20" max="95" value="50" onchange="updateSettings()" style="width: 50px;">
                     </div>
@@ -1677,6 +1682,7 @@
                     document.getElementById('autoExit').checked = data.auto_exit !== false;  // default true
                     document.getElementById('autoMove').checked = data.auto_move || false;
                     document.getElementById('autoHedge').checked = data.auto_hedge || false;
+                    document.getElementById('hedgeThreshold').value = data.hedge_loss_threshold || 3.0;
                     document.getElementById('exitTargetPct').value = data.exit_target_pct || 50;
                     window.exitTargetPct = data.exit_target_pct || 50;
                     document.getElementById('lotQuantity').value = data.lot_quantity;
@@ -1695,6 +1701,7 @@
             const autoExit = document.getElementById('autoExit').checked;
             const autoMove = document.getElementById('autoMove').checked;
             const autoHedge = document.getElementById('autoHedge').checked;
+            const hedgeThreshold = parseFloat(document.getElementById('hedgeThreshold').value);
             const exitTargetPct = parseInt(document.getElementById('exitTargetPct').value);
             window.exitTargetPct = exitTargetPct;
             refreshHistory();  // Re-render history with new target %
@@ -1717,6 +1724,7 @@
                     auto_exit: autoExit,
                     auto_move: autoMove,
                     auto_hedge: autoHedge,
+                    hedge_threshold: hedgeThreshold,
                     exit_target_pct: exitTargetPct,
                     lot_quantity: lotQuantity,
                     target_delta: targetDelta,
