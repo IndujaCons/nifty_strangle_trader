@@ -1802,19 +1802,15 @@
             function formatOIChange(value, isCE) {
                 const formatted = formatOI(Math.abs(value));
                 const sign = value >= 0 ? '+' : '-';
-                // CE increase = bearish (red), PE increase = bullish (green)
+                // Simple coloring: increase = green, decrease = red
                 let color = '#666';
                 let indicator = '';
                 if (value > 50000) {  // Significant increase
-                    if (isCE) {
-                        color = '#f44336';  // Red for CE buildup (bearish)
-                        indicator = ' ▼';
-                    } else {
-                        color = '#4caf50';  // Green for PE buildup (bullish)
-                        indicator = ' ▲';
-                    }
-                } else if (value < -50000) {  // Significant decrease (unwinding)
-                    color = '#999';
+                    color = '#4caf50';  // Green
+                    indicator = ' ▲';
+                } else if (value < -50000) {  // Significant decrease
+                    color = '#f44336';  // Red
+                    indicator = ' ▼';
                 }
                 return `<span style="color: ${color};">${sign}${formatted}${indicator}</span>`;
             }
