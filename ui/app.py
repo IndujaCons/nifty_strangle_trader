@@ -683,10 +683,52 @@ def market_data():
         data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
 
         if not data:
-            return jsonify({
-                "market_status": market_status,
-                "error": "Could not fetch strangle data"
-            })
+            # Still fetch PCR/OI even when strangle data unavailable (e.g. 0 DTE)
+            try:
+                spot = provider.get_spot_price()
+                atm_strike = round(spot / 50) * 50
+                nearest_expiry = provider.get_expiries()[0]
+                pcr_data = fetch_pcr_from_zerodha(provider, nearest_expiry)
+                oi_analysis = oi_tracker.get_analysis(atm_strike=atm_strike)
+
+                # Capture OI baseline if needed
+                current_time = now.time()
+                baseline_start = datetime.strptime("09:15", "%H:%M").time()
+                baseline_end = datetime.strptime("09:20", "%H:%M").time()
+                market_close_time = datetime.strptime("15:30", "%H:%M").time()
+                if not oi_tracker.has_baseline():
+                    strikes_data = pcr_data.get("strikes_data", {})
+                    if strikes_data:
+                        if baseline_start <= current_time <= baseline_end:
+                            oi_tracker.set_baseline(strikes_data)
+                        elif current_time > baseline_end and current_time <= market_close_time:
+                            oi_tracker.set_baseline(strikes_data)
+
+                return jsonify({
+                    "market_status": market_status,
+                    "spot": spot,
+                    "atm_strike": atm_strike,
+                    "straddle_price": None,
+                    "straddle_vwap": None,
+                    "vwap_diff": None,
+                    "expiry": selected_expiry,
+                    "dte": (expiry_date - date.today()).days if expiry_date else None,
+                    "call": None,
+                    "put": None,
+                    "total_premium": None,
+                    "per_lot": None,
+                    "width": None,
+                    "pcr": pcr_data.get("pcr"),
+                    "oi_analysis": oi_analysis,
+                    "oi_expiry": str(nearest_expiry),
+                    "error": "Could not fetch strangle data for this expiry"
+                })
+            except Exception as fallback_e:
+                print(f"[Market Data] Fallback also failed: {fallback_e}")
+                return jsonify({
+                    "market_status": market_status,
+                    "error": "Could not fetch strangle data"
+                })
 
         # Update signal tracker (skip if requested - e.g., when only updating margin)
         skip_signal = request.args.get('skip_signal', 'false').lower() == 'true'

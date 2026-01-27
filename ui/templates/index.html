@@ -1884,9 +1884,9 @@
             fetch(url)
                 .then(res => res.json())
                 .then(data => {
-                    if (data.error) {
-                        console.log('Market data error:', data.error);
-                        // Clear stale data on error
+                    if (data.error && !data.spot) {
+                        console.log('Market data error (no data):', data.error);
+                        // Clear stale data on complete error
                         document.getElementById('straddlePrice').textContent = '--';
                         document.getElementById('straddleVwap').textContent = '--';
                         document.getElementById('callStrike').textContent = '--';
@@ -1898,6 +1898,19 @@
                         document.getElementById('oiExpiry').textContent = '--';
                         updateOIAnalysisDisplay(null, 'error');
                         return;
+                    }
+                    if (data.error) {
+                        console.log('Market data partial error:', data.error);
+                        // Clear only strangle-specific data
+                        document.getElementById('straddlePrice').textContent = '--';
+                        document.getElementById('straddleVwap').textContent = '--';
+                        document.getElementById('vwapDiff').textContent = '--';
+                        document.getElementById('callStrike').textContent = '--';
+                        document.getElementById('callLtp').textContent = '--';
+                        document.getElementById('callDelta').textContent = '--';
+                        document.getElementById('putStrike').textContent = '--';
+                        document.getElementById('putLtp').textContent = '--';
+                        document.getElementById('putDelta').textContent = '--';
                     }
 
                     lastMarketData = data;
@@ -1924,7 +1937,7 @@
                     document.getElementById('straddleVwap').textContent = data.straddle_vwap?.toFixed(2) || '--';
 
                     const diffEl = document.getElementById('vwapDiff');
-                    if (data.vwap_diff !== undefined) {
+                    if (data.vwap_diff !== undefined && data.vwap_diff !== null) {
                         const sign = data.vwap_diff >= 0 ? '+' : '';
                         diffEl.textContent = sign + data.vwap_diff.toFixed(2);
                         diffEl.className = 'value ' + (data.vwap_diff >= 0 ? 'positive' : 'negative');
