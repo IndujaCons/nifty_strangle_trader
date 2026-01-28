@@ -167,16 +167,16 @@ class KiteDataProvider:
         return expiries[1] if len(expiries) > 1 else nearest
 
     def _is_monthly_expiry(self, exp_date: date) -> bool:
-        """Check if an expiry is a monthly expiry (last Tuesday of the month)."""
+        """Check if an expiry is a monthly expiry (last Tuesday of the month, or Monday if Tuesday is a holiday)."""
         import calendar
         year, month = exp_date.year, exp_date.month
-        # Find last day of month
         last_day = calendar.monthrange(year, month)[1]
         # Find last Tuesday (weekday 1)
         d = date(year, month, last_day)
-        while d.weekday() != 1:  # Tuesday
+        while d.weekday() != 1:
             d = d - timedelta(days=1)
-        return exp_date == d
+        # Match last Tuesday or the Monday before (holiday shift)
+        return exp_date == d or exp_date == d - timedelta(days=1)
 
     def get_available_expiries(self, count: int = 2, min_dte: int = 3, position_expiries: List[date] = None) -> List[dict]:
         """
