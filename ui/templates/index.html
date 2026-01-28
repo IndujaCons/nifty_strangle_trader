@@ -918,6 +918,60 @@
         .toast.error {
             background: #5a2d2d;
         }
+
+        .info-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: transparent;
+            z-index: 1000;
+        }
+        .info-modal-overlay.active { display: block; }
+        .info-modal {
+            position: absolute;
+            background: #fff;
+            border: 2px solid #e0d8cc;
+            border-radius: 8px;
+            padding: 16px 20px;
+            max-width: 300px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: #3d3d3d;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .info-modal h3 {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #5a5a5a;
+        }
+        .info-modal pre {
+            white-space: pre-wrap;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            line-height: 1.6;
+            color: #3d3d3d;
+            margin-bottom: 12px;
+        }
+        .info-modal button {
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 4px 14px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            cursor: pointer;
+            color: #5a5a5a;
+        }
+        .info-modal button:hover { background: #f5f0e8; }
+        .info-btn {
+            cursor: pointer;
+            color: #999;
+            font-size: 0.7rem;
+            margin-left: 4px;
+            font-style: italic;
+        }
+        .info-btn:hover { color: #5a5a5a; }
     </style>
 </head>
 <body>
@@ -983,79 +1037,87 @@
                 <div class="settings-group">
                     <h3 style="font-size: 0.85rem; color: #888; margin-bottom: 15px;">SETTINGS</h3>
 
-                    <div class="setting-row">
-                        <label>Live Trading</label>
-                        <label class="toggle">
-                            <input type="checkbox" id="liveTrading" onchange="updateSettings()">
-                            <span class="toggle-slider"></span>
-                        </label>
+                    <div style="border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;">
+                        <div class="setting-row">
+                            <label>Live Trading</label>
+                            <label class="toggle">
+                                <input type="checkbox" id="liveTrading" onchange="updateSettings()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-row">
+                            <label>Auto Trade</label>
+                            <label class="toggle">
+                                <input type="checkbox" id="autoTrade" onchange="updateSettings()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-row">
+                            <label>Lots per Trade</label>
+                            <input type="number" id="lotQuantity" min="1" max="50" value="6" onchange="updateSettings()">
+                        </div>
+
+                        <div class="setting-row">
+                            <label>Lot Size</label>
+                            <span id="lotSize">65</span>
+                        </div>
+
+                        <div class="setting-row">
+                            <label>Total Qty</label>
+                            <span id="totalQty">390</span>
+                        </div>
+
+                        <div class="setting-row">
+                            <label>Target Delta</label>
+                            <input type="number" id="targetDelta" min="2" max="50" value="7" onchange="updateSettings()" style="width: 50px;">
+                        </div>
                     </div>
 
-                    <div class="setting-row">
-                        <label>Auto Trade</label>
-                        <label class="toggle">
-                            <input type="checkbox" id="autoTrade" onchange="updateSettings()">
-                            <span class="toggle-slider"></span>
-                        </label>
+                    <div style="border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;">
+                        <div class="setting-row">
+                            <label>Auto Exit <span class="info-btn" onclick="showInfo('Auto Exit', 'Recommended Exit Target by DTE:\n>7 DTE: 50%\n6 DTE: 40%\n5 DTE: 30%\n4 DTE: 25%\n3 DTE: 20%\n2 DTE: Anything > 0%\nWindow: 9:15 AM – 3:30 PM', event)">i</span></label>
+                            <label class="toggle">
+                                <input type="checkbox" id="autoExit" onchange="updateSettings()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-row">
+                            <label>Exit Target %</label>
+                            <input type="number" id="exitTargetPct" min="20" max="95" value="50" onchange="updateSettings()" style="width: 50px;">
+                        </div>
                     </div>
 
-                    <div class="setting-row">
-                        <label>Auto Exit</label>
-                        <label class="toggle">
-                            <input type="checkbox" id="autoExit" onchange="updateSettings()">
-                            <span class="toggle-slider"></span>
-                        </label>
+                    <div style="border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;">
+                        <div class="setting-row">
+                            <label>Auto Move <span class="info-btn" onclick="showInfo('Auto Move', 'Rolls decayed positions to fresh target delta strike.\nRecommended: Move Decay 50-60%\nWindow: 9:30 AM – 3:15 PM', event)">i</span></label>
+                            <label class="toggle">
+                                <input type="checkbox" id="autoMove" onchange="updateSettings()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="setting-row">
+                            <label>Move Decay %</label>
+                            <input type="number" id="decayThreshold" min="10" max="90" value="60" onchange="updateSettings()" style="width: 50px;">
+                        </div>
                     </div>
 
-                    <div class="setting-row">
-                        <label>Auto Move</label>
-                        <label class="toggle">
-                            <input type="checkbox" id="autoMove" onchange="updateSettings()">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
+                    <div style="border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;">
+                        <div class="setting-row">
+                            <label>Auto Hedge <span class="info-btn" onclick="showInfo('Auto Hedge', 'Sells extra leg on winning side when losing leg blows up.\nRecommended: Hedge Threshold 3-4x\nWindow: 9:30 AM – 3:15 PM\nMax: 1 hedge per losing leg (permanent)', event)">i</span></label>
+                            <label class="toggle">
+                                <input type="checkbox" id="autoHedge" onchange="updateSettings()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
 
-                    <div class="setting-row">
-                        <label>Auto Hedge</label>
-                        <label class="toggle">
-                            <input type="checkbox" id="autoHedge" onchange="updateSettings()">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-
-                    <div class="setting-row">
-                        <label>Hedge Threshold x</label>
-                        <input type="number" id="hedgeThreshold" min="1.5" max="10" step="0.5" value="3.0" onchange="updateSettings()" style="width: 50px;">
-                    </div>
-
-                    <div class="setting-row">
-                        <label>Exit Target %</label>
-                        <input type="number" id="exitTargetPct" min="20" max="95" value="50" onchange="updateSettings()" style="width: 50px;">
-                    </div>
-
-                    <div class="setting-row">
-                        <label>Lots per Trade</label>
-                        <input type="number" id="lotQuantity" min="1" max="50" value="6" onchange="updateSettings()">
-                    </div>
-
-                    <div class="setting-row">
-                        <label>Lot Size</label>
-                        <span id="lotSize">65</span>
-                    </div>
-
-                    <div class="setting-row">
-                        <label>Total Qty</label>
-                        <span id="totalQty">390</span>
-                    </div>
-
-                    <div class="setting-row">
-                        <label>Target Delta</label>
-                        <input type="number" id="targetDelta" min="2" max="50" value="7" onchange="updateSettings()" style="width: 50px;">
-                    </div>
-
-                    <div class="setting-row">
-                        <label>Move Decay %</label>
-                        <input type="number" id="decayThreshold" min="10" max="90" value="60" onchange="updateSettings()" style="width: 50px;">
+                        <div class="setting-row">
+                            <label>Hedge Threshold x</label>
+                            <input type="number" id="hedgeThreshold" min="1.5" max="10" step="0.5" value="3.0" onchange="updateSettings()" style="width: 50px;">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2630,6 +2692,27 @@
                 btn.textContent = 'Confirm Trade';
             });
         }
+        function showInfo(title, text, event) {
+            const overlay = document.getElementById('infoModalOverlay');
+            const modal = document.getElementById('infoModal');
+            document.getElementById('infoModalTitle').textContent = title;
+            document.getElementById('infoModalText').textContent = text;
+            overlay.classList.add('active');
+            const x = event.clientX + 10;
+            const y = event.clientY + 10;
+            modal.style.left = Math.min(x, window.innerWidth - 320) + 'px';
+            modal.style.top = Math.min(y, window.innerHeight - 200) + 'px';
+        }
+        function closeInfo() {
+            document.getElementById('infoModalOverlay').classList.remove('active');
+        }
     </script>
+    <div id="infoModalOverlay" class="info-modal-overlay" onclick="if(event.target===this)closeInfo()">
+        <div id="infoModal" class="info-modal">
+            <h3 id="infoModalTitle"></h3>
+            <pre id="infoModalText"></pre>
+            <button onclick="closeInfo()">Close</button>
+        </div>
+    </div>
 </body>
 </html>
