@@ -1166,7 +1166,7 @@
                 <!-- OI Analysis Section - 6 Strike Table -->
                 <div class="oi-analysis-box" style="background: #fafafa; border-radius: 8px; padding: 12px; margin-bottom: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-weight: 600; font-size: 0.8rem; color: #333;">OI Analysis (<span id="oiExpiry" style="color: #666;">--</span>) - Since <span id="oiBaselineTime">9:15</span></span>
+                        <span style="font-weight: 600; font-size: 0.8rem; color: #333;">OI Analysis (<span id="oiExpiry" style="color: #666;">--</span>) - Since <span id="oiBaselineTime">9:15</span><span id="oiBaselineSpot"></span></span>
                         <span class="oi-signal" id="oiSignal" style="padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: #e0e0e0; color: #666;">--</span>
                     </div>
                     <table class="oi-table" style="width: 100%; font-size: 0.7rem; border-collapse: collapse;">
@@ -1862,9 +1862,13 @@
                 return;
             }
 
-            // Update baseline time
+            // Update baseline time and spot
             if (analysis.baseline_time) {
                 baselineTimeEl.textContent = analysis.baseline_time;
+            }
+            const baselineSpotEl = document.getElementById('oiBaselineSpot');
+            if (analysis.baseline_spot) {
+                baselineSpotEl.textContent = ' @ ' + Math.round(analysis.baseline_spot);
             }
 
             // Format OI values (convert to lakhs)

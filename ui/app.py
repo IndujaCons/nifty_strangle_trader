@@ -61,12 +61,14 @@ class OITracker:
         self.baseline_time = None
         self.baseline_date = None  # Track which date the baseline is for
         self.current_data = {}  # Latest data for each strike
+        self.baseline_spot = None
 
-    def set_baseline(self, strikes_data):
+    def set_baseline(self, strikes_data, spot_price=None):
         """Set 9:15 AM baseline - call once at market open."""
         self.baseline_snapshot = strikes_data.copy()
         self.baseline_time = datetime.now()
         self.baseline_date = date.today()
+        self.baseline_spot = spot_price
         print(f"[OI Tracker] Baseline set at {self.baseline_time.strftime('%H:%M:%S')} for {len(strikes_data)} strikes")
 
     def update_current(self, strikes_data):
@@ -154,7 +156,8 @@ class OITracker:
             "signal": signal,
             "confidence": confidence,
             "reason": reason,
-            "action": action
+            "action": action,
+            "baseline_spot": self.baseline_spot
         }
 
     def _calculate_signal(self, ce_above, pe_below, total_ce, total_pe):
@@ -379,6 +382,7 @@ def fetch_pcr_from_zerodha(kite_provider, expiry_date=None):
             "atm_100": atm_100,
             "atm_ce_oi": atm_100_data["ce_oi"],
             "atm_pe_oi": atm_100_data["pe_oi"],
+            "spot": spot,
             "strikes_data": valid_strikes,  # Include 6-strike data for baseline capture
             "timestamp": time.time()
         }
@@ -1221,11 +1225,11 @@ def market_data():
             if strikes_data:
                 if baseline_start <= current_time <= baseline_end:
                     # Ideal: capture during 9:15-9:20 window
-                    oi_tracker.set_baseline(strikes_data)
+                    oi_tracker.set_baseline(strikes_data, pcr_data.get("spot"))
                     print(f"[OI Tracker] 9:15 baseline captured with {len(strikes_data)} strikes")
                 elif current_time > baseline_end and current_time <= market_close:
                     # Fallback: app started late, use current data as baseline
-                    oi_tracker.set_baseline(strikes_data)
+                    oi_tracker.set_baseline(strikes_data, pcr_data.get("spot"))
                     print(f"[OI Tracker] Late baseline captured at {now.strftime('%H:%M')} with {len(strikes_data)} strikes (app started after 9:20)")
 
         # PCR History Manager - SIP alert and auto-save
