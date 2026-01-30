@@ -134,9 +134,9 @@ class OITracker:
             # Accumulate for signal calculation
             total_ce_buildup += ce_chg
             total_pe_buildup += pe_chg
-            if strike > atm_100:
+            if strike >= atm_100:
                 total_ce_buildup_above += ce_chg
-            if strike < atm_100:
+            if strike <= atm_100:
                 total_pe_buildup_below += pe_chg
 
         if not strikes_analysis:
