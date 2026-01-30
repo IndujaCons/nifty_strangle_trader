@@ -759,6 +759,7 @@ def market_data():
 
         # Auto-exit: Exit positions when profit target is reached (PER EXPIRY)
         # Works for ALL trades (manual or auto) based on actual position data
+        auto_exit_triggered = False
         if config.get("auto_exit") and not skip_signal:
             try:
                 import re
@@ -850,6 +851,7 @@ def market_data():
                                         orders_placed.append({"symbol": symbol, "order_id": order_id})
 
                                 if orders_placed:
+                                    auto_exit_triggered = True
                                     exited_expiries.add(expiry_key)
                                     auto_trade_state["last_exit_date"] = today
                                     auto_trade_state["exited_expiries_today"] = exited_expiries
@@ -864,7 +866,7 @@ def market_data():
         move_window_end = datetime.strptime("15:15", "%H:%M").time()
         in_move_window = move_window_start <= current_time <= move_window_end
 
-        if config.get("auto_move") and not skip_signal and in_move_window:
+        if config.get("auto_move") and not skip_signal and in_move_window and not auto_exit_triggered:
             try:
                 import re
                 from greeks.black_scholes import BlackScholesCalculator
@@ -1031,7 +1033,7 @@ def market_data():
                 traceback.print_exc()
 
         # Auto-hedge: Sell extra leg on winning side when losing leg blows up
-        if config.get("auto_hedge") and not skip_signal and in_move_window:
+        if config.get("auto_hedge") and not skip_signal and in_move_window and not auto_exit_triggered:
             try:
                 import re
                 from greeks.black_scholes import BlackScholesCalculator
