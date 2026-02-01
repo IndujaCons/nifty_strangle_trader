@@ -8,6 +8,7 @@ Open: http://localhost:5000
 import sys
 import os
 import time
+import threading
 import requests
 from datetime import datetime, date
 
@@ -35,6 +36,8 @@ last_data = {}
 auto_sync_date = None  # Track last auto-sync date
 
 # Auto-trade tracking (prevents duplicate executions)
+trade_lock = threading.Lock()
+
 auto_trade_state = {
     "last_entry_date": None,      # Date of last auto-entry
     "last_entry_window": None,    # Window of last auto-entry (morning/afternoon)
@@ -720,9 +723,13 @@ def market_data():
         total_qty = config["lot_size"] * config["lot_quantity"]
         total_premium = data.per_lot * config["lot_quantity"]
 
-        # Auto-entry: Execute trade when entry_ready and auto_trade enabled
+        # Auto-entry/exit/move/hedge — lock to prevent concurrent execution from multiple tabs
         global auto_trade_state
-        if (config.get("auto_trade") and
+        got_trade_lock = trade_lock.acquire(blocking=False)
+        if not got_trade_lock:
+            print("[Trade Lock] Skipping auto-trade actions — another request is processing")
+
+        if (got_trade_lock and config.get("auto_trade") and
             signal_info.get("entry_ready") and
             not skip_signal):
 
@@ -760,7 +767,7 @@ def market_data():
         # Auto-exit: Exit positions when profit target is reached (PER EXPIRY)
         # Works for ALL trades (manual or auto) based on actual position data
         auto_exit_triggered = False
-        if config.get("auto_exit") and not skip_signal:
+        if got_trade_lock and config.get("auto_exit") and not skip_signal:
             try:
                 import re
 
@@ -866,7 +873,7 @@ def market_data():
         move_window_end = datetime.strptime("15:15", "%H:%M").time()
         in_move_window = move_window_start <= current_time <= move_window_end
 
-        if config.get("auto_move") and not skip_signal and in_move_window and not auto_exit_triggered:
+        if got_trade_lock and config.get("auto_move") and not skip_signal and in_move_window and not auto_exit_triggered:
             try:
                 import re
                 from greeks.black_scholes import BlackScholesCalculator
@@ -1033,7 +1040,7 @@ def market_data():
                 traceback.print_exc()
 
         # Auto-hedge: Sell extra leg on winning side when losing leg blows up
-        if config.get("auto_hedge") and not skip_signal and in_move_window and not auto_exit_triggered:
+        if got_trade_lock and config.get("auto_hedge") and not skip_signal and in_move_window and not auto_exit_triggered:
             try:
                 import re
                 from greeks.black_scholes import BlackScholesCalculator
@@ -1159,6 +1166,9 @@ def market_data():
                 print(f"[Auto-Hedge] Error: {e}")
                 import traceback
                 traceback.print_exc()
+
+        if got_trade_lock:
+            trade_lock.release()
 
         # Calculate margin required using Kite's margins API
         total_margin = 0
@@ -1603,7 +1613,9 @@ def history():
                         calculated_pnl = (current_ltp - avg_price) * quantity
 
                     live_expiry_data[expiry_key]['open'] += calculated_pnl
-                    # Note: Don't add 'realised' here - it's already captured in CSV via sync
+                    # Add realised profit from partial closes
+                    if realised != 0:
+                        live_expiry_data[expiry_key]['booked'] += realised
                     live_expiry_data[expiry_key]['open_positions'] += 1
                     # Max profit for sold options = premium collected = average_price × abs(quantity)
                     if quantity < 0:  # Sold position
@@ -1644,10 +1656,9 @@ def history():
             merged_data[expiry_display]['open'] = data['open']
             merged_data[expiry_display]['open_positions'] = data['open_positions']
             merged_data[expiry_display]['max_profit'] = data['max_profit']
-            # Update booked if we have realised profit from open positions today
-            if data['booked'] > 0 and data['open_positions'] > 0:
-                # This is realised profit from partial closing - handled separately
-                pass
+            # Add realised profit from partial closes to booked
+            if data['booked'] != 0:
+                merged_data[expiry_display]['booked'] += data['booked']
         else:
             # New expiry from live data
             merged_data[expiry_display] = data
