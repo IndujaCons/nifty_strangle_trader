@@ -1453,11 +1453,13 @@
                 .then(data => {
                     const selector = document.getElementById('expirySelector');
                     if (data.expiries && data.expiries.length > 0) {
-                        selector.innerHTML = data.expiries.map((exp, idx) =>
-                            `<option value="${exp.expiry}" ${idx === 0 ? 'selected' : ''}>${exp.label}</option>`
-                        ).join('');
-                        // Set default to first expiry
-                        selectedExpiry = data.expiries[0].expiry;
+                        const saved = localStorage.getItem('selectedExpiry');
+                        const validSaved = saved && data.expiries.some(e => e.expiry === saved);
+                        selector.innerHTML = data.expiries.map((exp, idx) => {
+                            const sel = validSaved ? exp.expiry === saved : idx === 0;
+                            return `<option value="${exp.expiry}" ${sel ? 'selected' : ''}>${exp.label}</option>`;
+                        }).join('');
+                        selectedExpiry = validSaved ? saved : data.expiries[0].expiry;
                         // Refresh market data with correct expiry
                         refreshMarketData();
                     } else {
@@ -1473,6 +1475,7 @@
         function onExpiryChange() {
             const selector = document.getElementById('expirySelector');
             selectedExpiry = selector.value;
+            localStorage.setItem('selectedExpiry', selectedExpiry);
             console.log('[Expiry] Changed to:', selectedExpiry);
             // Reset custom strikes when expiry changes
             customStrikes = { call: null, put: null };
