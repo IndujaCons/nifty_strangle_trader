@@ -172,6 +172,24 @@ class SignalTracker:
         current_window = self._get_current_window(now)
         can_trade = current_window is not None and self._can_trade_in_window(current_window)
 
+        # Only track signal inside trading windows (9:30 - 15:15)
+        if current_window is None:
+            if self.signal_state.is_active:
+                logger.info("Signal reset: outside trading window")
+            self.signal_state.reset()
+            return {
+                "signal_active": False,
+                "duration_seconds": 0,
+                "required_seconds": STRATEGY_CONFIG["signal_duration_seconds"],
+                "current_window": None,
+                "can_trade": False,
+                "entry_ready": False,
+                "morning_trades": self.window_state.morning_trades,
+                "afternoon_trades": self.window_state.afternoon_trades,
+                "straddle_price": straddle_price,
+                "vwap": vwap,
+            }
+
         # Check signal condition
         signal_met = straddle_price > vwap
 
