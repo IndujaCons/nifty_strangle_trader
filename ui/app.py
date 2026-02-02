@@ -1636,11 +1636,11 @@ def history():
     # Live data takes precedence for current day, CSV provides historical context
     merged_data = {}
 
-    # Add CSV history first
+    # Add CSV history first (booked = fully closed, partial_booked = partial closes)
     for expiry, data in csv_history.items():
         merged_data[expiry] = {
             'expiry': data['expiry'],
-            'booked': data['booked'],
+            'booked': data['booked'] + data.get('partial_booked', 0),
             'open': 0,
             'open_positions': 0,
             'closed_positions': data['closed_positions'],
@@ -1656,9 +1656,11 @@ def history():
             merged_data[expiry_display]['open'] = data['open']
             merged_data[expiry_display]['open_positions'] = data['open_positions']
             merged_data[expiry_display]['max_profit'] = data['max_profit']
-            # Add realised profit from partial closes to booked
+            # Live realised from API replaces CSV partial_booked (same source, avoid double-count)
             if data['booked'] != 0:
-                merged_data[expiry_display]['booked'] += data['booked']
+                csv_partial = csv_history.get(expiry_display, {}).get('partial_booked', 0)
+                merged_data[expiry_display]['booked'] -= csv_partial  # Remove CSV partial
+                merged_data[expiry_display]['booked'] += data['booked']  # Add live realised
         else:
             # New expiry from live data
             merged_data[expiry_display] = data

@@ -88,13 +88,24 @@ class TradeHistoryManager:
         for pos in positions:
             symbol = pos.get('tradingsymbol', '')
 
-            # Only process closed NIFTY positions
             if not symbol.startswith('NIFTY'):
                 continue
-            if pos.get('quantity', 0) != 0:
-                continue  # Still open
 
-            # Check if already recorded
+            quantity = pos.get('quantity', 0)
+            realised = pos.get('realised', 0)
+
+            # Handle partial closes: open position with realised profit
+            if quantity != 0 and realised != 0:
+                self._upsert_partial(pos, symbol)
+                continue
+
+            if quantity != 0:
+                continue  # Still open, no realised profit
+
+            # Fully closed — remove any prior partial entry and add final
+            self._remove_symbol(symbol)
+
+            # Check if already recorded as closed
             if symbol in existing:
                 continue
 
@@ -197,6 +208,57 @@ class TradeHistoryManager:
         # Fallback: return as-is
         return expiry_key
 
+    def _upsert_partial(self, pos: Dict, symbol: str):
+        """Insert or update a partial close entry with latest realised P&L."""
+        import re
+
+        # Remove existing partial entry for this symbol (will re-add with updated value)
+        self._remove_symbol(symbol)
+
+        # Parse symbol for expiry/strike/option_type
+        match = re.match(r'NIFTY(\d{2}[A-Z]{3})\d{5,}(CE|PE)', symbol)
+        if not match:
+            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})\d{5,}(CE|PE)', symbol)
+        if not match:
+            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})\d+(CE|PE)', symbol)
+        if not match:
+            return
+
+        expiry_display = self._format_expiry(match.group(1))
+        option_type = 'CE' if 'CE' in symbol else 'PE'
+        strike_match = re.search(r'(\d+)(CE|PE)', symbol)
+        strike = int(strike_match.group(1)) if strike_match else 0
+
+        trade_data = {
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'expiry': expiry_display,
+            'symbol': symbol,
+            'option_type': option_type,
+            'strike': strike,
+            'quantity': 0,
+            'entry_price': 0,
+            'exit_price': 0,
+            'pnl': pos.get('realised', 0),
+            'status': 'partial'
+        }
+        self.add_trade(trade_data)
+
+    def _remove_symbol(self, symbol: str):
+        """Remove all entries for a symbol from CSV."""
+        try:
+            rows = []
+            with open(self.csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames
+                rows = [row for row in reader if row.get('symbol') != symbol]
+
+            with open(self.csv_path, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+        except Exception:
+            pass
+
     def _load_existing_symbols(self) -> set:
         """Load set of existing symbols from CSV."""
         existing = set()
@@ -213,6 +275,7 @@ class TradeHistoryManager:
         """
         Get trade history grouped by expiry.
         Returns format compatible with /api/history endpoint.
+        Separates 'booked' (fully closed) from 'partial_booked' (partial closes).
         """
         expiry_data = {}
 
@@ -222,17 +285,22 @@ class TradeHistoryManager:
                 for row in reader:
                     expiry = row.get('expiry', 'Unknown')
                     pnl = float(row.get('pnl', 0))
+                    status = row.get('status', 'closed')
 
                     if expiry not in expiry_data:
                         expiry_data[expiry] = {
                             'expiry': expiry,
                             'booked': 0,
+                            'partial_booked': 0,
                             'open': 0,
                             'closed_positions': 0
                         }
 
-                    expiry_data[expiry]['booked'] += pnl
-                    expiry_data[expiry]['closed_positions'] += 1
+                    if status == 'partial':
+                        expiry_data[expiry]['partial_booked'] += pnl
+                    else:
+                        expiry_data[expiry]['booked'] += pnl
+                        expiry_data[expiry]['closed_positions'] += 1
         except Exception as e:
             print(f"Error reading history: {e}")
 
