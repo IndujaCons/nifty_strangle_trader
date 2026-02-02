@@ -212,6 +212,18 @@ class TradeHistoryManager:
         """Insert or update a partial close entry with latest realised P&L."""
         import re
 
+        # Check if existing partial has same value — skip rewrite if unchanged
+        new_pnl = pos.get('realised', 0)
+        try:
+            with open(self.csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get('symbol') == symbol and row.get('status') == 'partial':
+                        if abs(float(row.get('pnl', 0)) - new_pnl) < 0.01:
+                            return  # No change
+        except Exception:
+            pass
+
         # Remove existing partial entry for this symbol (will re-add with updated value)
         self._remove_symbol(symbol)
 

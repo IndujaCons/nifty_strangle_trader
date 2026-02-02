@@ -1616,15 +1616,17 @@ def history():
                     # Add realised profit from partial closes
                     if realised != 0:
                         live_expiry_data[expiry_key]['booked'] += realised
+                        # Also persist to CSV for next-day survival
+                        history_manager.update_from_positions([pos])
                     live_expiry_data[expiry_key]['open_positions'] += 1
                     # Max profit for sold options = premium collected = average_price × abs(quantity)
                     if quantity < 0:  # Sold position
                         max_profit_for_position = avg_price * abs(quantity)
                         live_expiry_data[expiry_key]['max_profit'] += max_profit_for_position
                 else:
-                    # Closed position - add to booked
-                    live_expiry_data[expiry_key]['booked'] += pnl
-                    live_expiry_data[expiry_key]['closed_positions'] += 1
+                    # Closed position - sync to CSV on the fly (dedup handled by add_trade)
+                    # Don't add to live_expiry_data to avoid double-counting with CSV
+                    history_manager.update_from_positions([pos])
 
     except Exception as e:
         print(f"Error fetching live positions: {e}")
@@ -1656,11 +1658,12 @@ def history():
             merged_data[expiry_display]['open'] = data['open']
             merged_data[expiry_display]['open_positions'] = data['open_positions']
             merged_data[expiry_display]['max_profit'] = data['max_profit']
-            # Live realised from API replaces CSV partial_booked (same source, avoid double-count)
+            # Live booked = realised from partial closes (from API)
+            # CSV partial_booked = same data persisted — replace CSV partial with live value
             if data['booked'] != 0:
                 csv_partial = csv_history.get(expiry_display, {}).get('partial_booked', 0)
-                merged_data[expiry_display]['booked'] -= csv_partial  # Remove CSV partial
-                merged_data[expiry_display]['booked'] += data['booked']  # Add live realised
+                merged_data[expiry_display]['booked'] -= csv_partial
+                merged_data[expiry_display]['booked'] += data['booked']
         else:
             # New expiry from live data
             merged_data[expiry_display] = data
