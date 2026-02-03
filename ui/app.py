@@ -1061,6 +1061,17 @@ def market_data():
                     qty = lot_size * lot_quantity
                     today = date.today()
 
+                    # Fetch fresh LTPs (positions API last_price can be stale)
+                    symbols_to_quote = [f"NFO:{p['tradingsymbol']}" for p in nifty_shorts]
+                    fresh_quotes = {}
+                    try:
+                        quote_data = provider.kite.quote(symbols_to_quote)
+                        for sym, val in quote_data.items():
+                            trading_sym = sym.replace("NFO:", "")
+                            fresh_quotes[trading_sym] = val.get('last_price', 0)
+                    except Exception as q_err:
+                        print(f"[Auto-Hedge] Quote fetch error: {q_err}")
+
                     # Group positions by expiry code to find CE/PE pairs
                     expiry_groups = defaultdict(list)
                     for pos in nifty_shorts:
@@ -1079,7 +1090,7 @@ def market_data():
                                 continue
 
                             avg_price = pos.get('average_price', 0)
-                            ltp = pos.get('last_price', 0)
+                            ltp = fresh_quotes.get(symbol, pos.get('last_price', 0))
                             print(f"[Auto-Hedge DEBUG] {symbol}: avg={avg_price}, ltp={ltp}, threshold={hedge_threshold}")
                             if avg_price <= 0:
                                 continue
