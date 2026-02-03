@@ -407,8 +407,8 @@ def get_config():
         "auto_trade": os.getenv("AUTO_TRADE", "false").lower() == "true",
         "auto_exit": os.getenv("AUTO_EXIT", "true").lower() == "true",
         "auto_move": os.getenv("AUTO_MOVE", "false").lower() == "true",
-        "auto_hedge": os.getenv("AUTO_HEDGE", "false").lower() == "true",
-        "hedge_loss_threshold": float(os.getenv("HEDGE_LOSS_THRESHOLD", "3.0")),
+        "buy_wings": os.getenv("BUY_WINGS", "false").lower() == "true",
+        "wing_delta": int(float(os.getenv("WING_DELTA", "0.02")) * 100),  # As percentage (2 = 0.02)
         "exit_target_pct": int(float(os.getenv("EXIT_TARGET_PCT", "0.50")) * 100),
         "lot_quantity": int(os.getenv("LOT_QUANTITY", "1")),
         "lot_size": NIFTY_CONFIG["lot_size"],
@@ -759,6 +759,26 @@ def market_data():
                         auto_trade_state["last_entry_expiry"] = str(data.expiry)
                         auto_trade_state["entry_premium"] = total_premium
                         print(f"[Auto-Trade] Entry executed: {data.call_strike}CE/{data.put_strike}PE, Premium: {total_premium:.2f}")
+
+                        # Buy protective wings if enabled (creates iron condor)
+                        if config.get("buy_wings"):
+                            try:
+                                wing_delta = float(os.getenv("WING_DELTA", "0.02"))
+                                wing_data = provider.find_strangle(expiry=data.expiry, target_delta=wing_delta)
+                                if wing_data:
+                                    wing_result = provider.place_wing_order(
+                                        expiry=data.expiry,
+                                        call_strike=wing_data.call_strike,
+                                        put_strike=wing_data.put_strike,
+                                    )
+                                    if wing_result.get("success"):
+                                        print(f"[Auto-Trade] Wings bought: {wing_data.call_strike}CE/{wing_data.put_strike}PE @ {wing_delta*100:.0f}δ")
+                                    else:
+                                        print(f"[Auto-Trade] Wing order failed: {wing_result.get('error')}")
+                                else:
+                                    print(f"[Auto-Trade] Could not find {wing_delta*100:.0f}δ strikes for wings")
+                            except Exception as wing_e:
+                                print(f"[Auto-Trade] Wing error: {wing_e}")
                     else:
                         print(f"[Auto-Trade] Entry failed: {result.get('error', 'Unknown error')}")
                 except Exception as e:
@@ -1040,147 +1060,10 @@ def market_data():
                 traceback.print_exc()
 
         # Auto-hedge: Sell extra leg on winning side when losing leg blows up
-        if got_trade_lock and config.get("auto_hedge") and not skip_signal and in_move_window and not auto_exit_triggered:
-            try:
-                import re
-                from greeks.black_scholes import BlackScholesCalculator
-                from collections import defaultdict
-
-                print(f"[Auto-Hedge] Checking positions... (threshold={os.getenv('HEDGE_LOSS_THRESHOLD', '3.0')}x)")
-                positions = provider.kite.positions()
-                net_positions = positions.get('net', [])
-                nifty_shorts = [p for p in net_positions
-                               if p['tradingsymbol'].startswith('NIFTY') and p['quantity'] < 0]
-
-                if nifty_shorts:
-                    hedge_threshold = float(os.getenv("HEDGE_LOSS_THRESHOLD", "3.0"))
-                    target_delta = float(os.getenv("TARGET_DELTA", "0.07"))
-                    hedged_positions = auto_trade_state.get("hedged_positions", set())
-                    lot_quantity = int(os.getenv("LOT_QUANTITY", "1"))
-                    lot_size = NIFTY_CONFIG["lot_size"]
-                    qty = lot_size * lot_quantity
-                    today = date.today()
-
-                    # Fetch fresh LTPs (positions API last_price can be stale)
-                    symbols_to_quote = [f"NFO:{p['tradingsymbol']}" for p in nifty_shorts]
-                    fresh_quotes = {}
-                    try:
-                        quote_data = provider.kite.quote(symbols_to_quote)
-                        for sym, val in quote_data.items():
-                            trading_sym = sym.replace("NFO:", "")
-                            fresh_quotes[trading_sym] = val.get('last_price', 0)
-                    except Exception as q_err:
-                        print(f"[Auto-Hedge] Quote fetch error: {q_err}")
-
-                    # Group positions by expiry code to find CE/PE pairs
-                    expiry_groups = defaultdict(list)
-                    for pos in nifty_shorts:
-                        symbol = pos['tradingsymbol']
-                        match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2}|\d{2}[A-Z]{3}|\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
-                        if match:
-                            expiry_groups[match.group(1)].append(pos)
-
-                    for expiry_code, group_positions in expiry_groups.items():
-                        for pos in group_positions:
-                            symbol = pos['tradingsymbol']
-
-                            # Skip if this losing leg was already hedged (permanent)
-                            if symbol in hedged_positions:
-                                print(f"[Auto-Hedge] Skipping {symbol} - already hedged")
-                                continue
-
-                            avg_price = pos.get('average_price', 0)
-                            ltp = fresh_quotes.get(symbol, pos.get('last_price', 0))
-                            print(f"[Auto-Hedge DEBUG] {symbol}: avg={avg_price}, ltp={ltp}, threshold={hedge_threshold}")
-                            if avg_price <= 0:
-                                continue
-
-                            loss_ratio = ltp / avg_price
-                            print(f"[Auto-Hedge DEBUG] {symbol}: loss_ratio={loss_ratio:.2f}x vs threshold={hedge_threshold}x")
-                            if loss_ratio < hedge_threshold:
-                                continue
-
-                            # This leg is losing — parse its type
-                            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2}|\d{2}[A-Z]{3}|\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
-                            if not match:
-                                continue
-                            exp_code = match.group(1)
-                            option_type = match.group(3)
-                            winning_type = "PE" if option_type == "CE" else "CE"
-
-                            # Parse expiry date (same logic as auto-move)
-                            import calendar
-                            month_name_map = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
-                                             'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
-                            month_char_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
-                                             '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
-                            try:
-                                if len(exp_code) == 7 and exp_code[2:5].isalpha():
-                                    yy = int(exp_code[:2])
-                                    mm = month_name_map.get(exp_code[2:5].upper(), 1)
-                                    dd = int(exp_code[5:7])
-                                    expiry_date = date(2000 + yy, mm, dd)
-                                elif len(exp_code) == 5 and exp_code[2:5].isalpha():
-                                    yy = int(exp_code[:2])
-                                    mm = month_name_map.get(exp_code[2:5].upper(), 1)
-                                    last_day = calendar.monthrange(2000 + yy, mm)[1]
-                                    d = date(2000 + yy, mm, last_day)
-                                    while d.weekday() != 1:
-                                        d = d.replace(day=d.day - 1)
-                                    expiry_date = d
-                                elif len(exp_code) == 5:
-                                    yy = int(exp_code[:2])
-                                    month_char = exp_code[2]
-                                    dd = int(exp_code[3:5])
-                                    mm = month_char_map.get(month_char, int(month_char) if month_char.isdigit() else 1)
-                                    expiry_date = date(2000 + yy, mm, dd)
-                                else:
-                                    continue
-                            except:
-                                continue
-
-                            print(f"[Auto-Hedge] {symbol}: Loss ratio {loss_ratio:.1f}x >= {hedge_threshold:.1f}x threshold (avg: {avg_price:.2f}, ltp: {ltp:.2f})")
-                            print(f"[Auto-Hedge] Selling extra {winning_type} leg on winning side for expiry {expiry_date}")
-
-                            # Find target delta strike on winning side
-                            strangle_data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
-                            if not strangle_data:
-                                print(f"[Auto-Hedge] Could not find strangle data for {expiry_date}")
-                                continue
-
-                            new_strike = strangle_data.call_strike if winning_type == "CE" else strangle_data.put_strike
-                            new_symbol = provider.get_trading_symbol(expiry_date, new_strike, winning_type)
-                            if not new_symbol:
-                                print(f"[Auto-Hedge] Could not get trading symbol for {new_strike} {winning_type}")
-                                continue
-
-                            paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
-
-                            if paper_trading:
-                                print(f"[Auto-Hedge] PAPER: Would sell {new_symbol} ({lot_quantity} lot(s) = {qty} qty) to hedge losing {symbol}")
-                                hedged_positions.add(symbol)
-                            else:
-                                try:
-                                    order_id = provider.kite.place_order(
-                                        variety="regular",
-                                        exchange="NFO",
-                                        tradingsymbol=new_symbol,
-                                        transaction_type="SELL",
-                                        quantity=qty,
-                                        order_type="MARKET",
-                                        product="NRML"
-                                    )
-                                    print(f"[Auto-Hedge] Sold {new_symbol} (order #{order_id}) to hedge losing {symbol}")
-                                    hedged_positions.add(symbol)
-                                except Exception as order_e:
-                                    print(f"[Auto-Hedge] Order error: {order_e}")
-
-                            auto_trade_state["hedged_positions"] = hedged_positions
-
-            except Exception as e:
-                print(f"[Auto-Hedge] Error: {e}")
-                import traceback
-                traceback.print_exc()
+        # OLD AUTO-HEDGE (disabled) - was selling more on winning side when losing leg hit threshold
+        # Replaced with "Buy Wings" feature that buys protective options on entry
+        # if got_trade_lock and config.get("auto_hedge") and not skip_signal and in_move_window and not auto_exit_triggered:
+        #     ... (old code removed) ...
 
         if got_trade_lock:
             trade_lock.release()
@@ -2332,15 +2215,15 @@ def update_settings():
         set_key(str(ENV_FILE), "AUTO_MOVE", value)
         os.environ["AUTO_MOVE"] = value
 
-    if "auto_hedge" in data:
-        value = "true" if data["auto_hedge"] else "false"
-        set_key(str(ENV_FILE), "AUTO_HEDGE", value)
-        os.environ["AUTO_HEDGE"] = value
+    if "buy_wings" in data:
+        value = "true" if data["buy_wings"] else "false"
+        set_key(str(ENV_FILE), "BUY_WINGS", value)
+        os.environ["BUY_WINGS"] = value
 
-    if "hedge_threshold" in data:
-        value = str(float(data["hedge_threshold"]))
-        set_key(str(ENV_FILE), "HEDGE_LOSS_THRESHOLD", value)
-        os.environ["HEDGE_LOSS_THRESHOLD"] = value
+    if "wing_delta" in data:
+        value = str(int(data["wing_delta"]) / 100)  # 2 → "0.02"
+        set_key(str(ENV_FILE), "WING_DELTA", value)
+        os.environ["WING_DELTA"] = value
 
     if "exit_target_pct" in data:
         value = str(int(data["exit_target_pct"]) / 100)  # 50 → "0.50"

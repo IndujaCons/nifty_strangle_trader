@@ -1107,16 +1107,16 @@
 
                     <div style="border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;">
                         <div class="setting-row">
-                            <label>Auto Hedge <span class="info-btn" onclick="showInfo('Auto Hedge', 'Sells extra leg on winning side when losing leg blows up.\nRecommended: Hedge Threshold 3-4x\nWindow: 9:30 AM – 3:15 PM\nMax: 1 hedge per losing leg (permanent)', event)">i</span></label>
+                            <label>Buy Wings <span class="info-btn" onclick="showInfo('Buy Wings (Iron Condor)', 'Buys protective options at wing delta when entering a strangle.\nCreates an iron condor to cap maximum loss.\nRecommended: Wing Delta 2-3 (0.02-0.03)\nTrade-off: Reduces premium but limits catastrophic loss.', event)">i</span></label>
                             <label class="toggle">
-                                <input type="checkbox" id="autoHedge" onchange="updateSettings()">
+                                <input type="checkbox" id="buyWings" onchange="updateSettings()">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
 
                         <div class="setting-row">
-                            <label>Hedge Threshold x</label>
-                            <input type="number" id="hedgeThreshold" min="1.5" max="10" step="0.5" value="3.0" onchange="updateSettings()" style="width: 50px;">
+                            <label>Wing Delta</label>
+                            <input type="number" id="wingDelta" min="1" max="5" step="1" value="2" onchange="updateSettings()" style="width: 50px;">
                         </div>
                     </div>
                 </div>
@@ -1740,8 +1740,8 @@
                     document.getElementById('autoTrade').checked = data.auto_trade || false;
                     document.getElementById('autoExit').checked = data.auto_exit !== false;  // default true
                     document.getElementById('autoMove').checked = data.auto_move || false;
-                    document.getElementById('autoHedge').checked = data.auto_hedge || false;
-                    document.getElementById('hedgeThreshold').value = data.hedge_loss_threshold || 3.0;
+                    document.getElementById('buyWings').checked = data.buy_wings || false;
+                    document.getElementById('wingDelta').value = data.wing_delta || 2;
                     document.getElementById('exitTargetPct').value = data.exit_target_pct || 50;
                     window.exitTargetPct = data.exit_target_pct || 50;
                     document.getElementById('lotQuantity').value = data.lot_quantity;
@@ -1759,8 +1759,8 @@
             const autoTrade = document.getElementById('autoTrade').checked;
             const autoExit = document.getElementById('autoExit').checked;
             const autoMove = document.getElementById('autoMove').checked;
-            const autoHedge = document.getElementById('autoHedge').checked;
-            const hedgeThreshold = parseFloat(document.getElementById('hedgeThreshold').value);
+            const buyWings = document.getElementById('buyWings').checked;
+            const wingDelta = parseInt(document.getElementById('wingDelta').value);
             const exitTargetPct = parseInt(document.getElementById('exitTargetPct').value);
             window.exitTargetPct = exitTargetPct;
             refreshHistory();  // Re-render history with new target %
@@ -1782,8 +1782,8 @@
                     auto_trade: autoTrade,
                     auto_exit: autoExit,
                     auto_move: autoMove,
-                    auto_hedge: autoHedge,
-                    hedge_threshold: hedgeThreshold,
+                    buy_wings: buyWings,
+                    wing_delta: wingDelta,
                     exit_target_pct: exitTargetPct,
                     lot_quantity: lotQuantity,
                     target_delta: targetDelta,

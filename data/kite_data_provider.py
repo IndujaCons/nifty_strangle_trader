@@ -609,6 +609,95 @@ class KiteDataProvider:
 
         return result
 
+    def place_wing_order(
+        self,
+        expiry: date,
+        call_strike: float,
+        put_strike: float,
+        quantity: int = None
+    ) -> dict:
+        """
+        Place wing buy orders (protective options for iron condor).
+
+        Args:
+            expiry: Option expiry date
+            call_strike: Call strike to buy (further OTM)
+            put_strike: Put strike to buy (further OTM)
+            quantity: Number of lots (default: LOT_QUANTITY from .env)
+
+        Returns:
+            dict with order details and status
+        """
+        lot_size = NIFTY_CONFIG["lot_size"]
+        num_lots = quantity if quantity is not None else LOT_QUANTITY
+        total_qty = lot_size * num_lots
+
+        # Get trading symbols
+        call_symbol = self.get_trading_symbol(expiry, call_strike, 'CE')
+        put_symbol = self.get_trading_symbol(expiry, put_strike, 'PE')
+
+        if not call_symbol or not put_symbol:
+            return {
+                "success": False,
+                "error": "Could not find trading symbols for wings",
+                "call_symbol": call_symbol,
+                "put_symbol": put_symbol,
+            }
+
+        result = {
+            "success": False,
+            "call_order": None,
+            "put_order": None,
+            "call_symbol": call_symbol,
+            "put_symbol": put_symbol,
+            "quantity": total_qty,
+            "paper_trading": PAPER_TRADING,
+        }
+
+        if PAPER_TRADING:
+            # Simulate order placement
+            logger.info(f"[PAPER] Buying wing {call_symbol} x {total_qty}")
+            logger.info(f"[PAPER] Buying wing {put_symbol} x {total_qty}")
+            result["success"] = True
+            result["call_order"] = {"order_id": "PAPER_WING_CE_001", "status": "COMPLETE"}
+            result["put_order"] = {"order_id": "PAPER_WING_PE_001", "status": "COMPLETE"}
+            return result
+
+        try:
+            # Place CALL buy order (protection)
+            call_order_id = self.kite.place_order(
+                variety=self.kite.VARIETY_REGULAR,
+                exchange=self.kite.EXCHANGE_NFO,
+                tradingsymbol=call_symbol,
+                transaction_type=self.kite.TRANSACTION_TYPE_BUY,
+                quantity=total_qty,
+                product=self.kite.PRODUCT_NRML,
+                order_type=self.kite.ORDER_TYPE_MARKET,
+            )
+            logger.info(f"Wing call order placed: {call_order_id}")
+            result["call_order"] = {"order_id": call_order_id, "status": "PLACED"}
+
+            # Place PUT buy order (protection)
+            put_order_id = self.kite.place_order(
+                variety=self.kite.VARIETY_REGULAR,
+                exchange=self.kite.EXCHANGE_NFO,
+                tradingsymbol=put_symbol,
+                transaction_type=self.kite.TRANSACTION_TYPE_BUY,
+                quantity=total_qty,
+                product=self.kite.PRODUCT_NRML,
+                order_type=self.kite.ORDER_TYPE_MARKET,
+            )
+            logger.info(f"Wing put order placed: {put_order_id}")
+            result["put_order"] = {"order_id": put_order_id, "status": "PLACED"}
+
+            result["success"] = True
+
+        except Exception as e:
+            logger.error(f"Wing order placement failed: {e}")
+            result["error"] = str(e)
+
+        return result
+
     def get_order_status(self, order_id: str) -> dict:
         """Get status of a specific order."""
         try:
