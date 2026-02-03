@@ -51,7 +51,8 @@ class TradeHistoryManager:
         try:
             # Double-check symbol doesn't already exist (prevent race conditions)
             symbol = trade_data.get('symbol', '')
-            if symbol and symbol in self._load_existing_symbols():
+            closed, partial = self._load_existing_symbols()
+            if symbol and symbol in (closed | partial):
                 return False
 
             with open(self.csv_path, 'a', newline='') as f:
@@ -81,8 +82,8 @@ class TradeHistoryManager:
         """
         import re
 
-        # Load existing entries
-        existing = self._load_existing_symbols()
+        # Load existing entries (separate closed vs partial)
+        closed_symbols, partial_symbols = self._load_existing_symbols()
         added = 0
 
         for pos in positions:
@@ -102,12 +103,14 @@ class TradeHistoryManager:
             if quantity != 0:
                 continue  # Still open, no realised profit
 
-            # Fully closed — remove any prior partial entry and add final
-            self._remove_symbol(symbol)
-
-            # Check if already recorded as closed
-            if symbol in existing:
+            # Skip if already recorded as closed
+            if symbol in closed_symbols:
                 continue
+
+            # Remove any prior partial entry before adding as closed
+            if symbol in partial_symbols:
+                self._remove_symbol(symbol)
+                partial_symbols.discard(symbol)
 
             # Extract expiry from symbol
             # Monthly MUST be checked BEFORE weekly to avoid false matches
@@ -149,7 +152,7 @@ class TradeHistoryManager:
 
             if self.add_trade(trade_data):
                 added += 1
-                existing.add(symbol)
+                closed_symbols.add(symbol)
 
         return added
 
@@ -271,17 +274,22 @@ class TradeHistoryManager:
         except Exception:
             pass
 
-    def _load_existing_symbols(self) -> set:
-        """Load set of existing symbols from CSV."""
-        existing = set()
+    def _load_existing_symbols(self) -> tuple:
+        """Load sets of existing symbols from CSV (closed vs partial)."""
+        closed = set()
+        partial = set()
         try:
             with open(self.csv_path, 'r') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    existing.add(row.get('symbol', ''))
+                    symbol = row.get('symbol', '')
+                    if row.get('status') == 'partial':
+                        partial.add(symbol)
+                    else:
+                        closed.add(symbol)
         except Exception:
             pass
-        return existing
+        return closed, partial
 
     def get_history_by_expiry(self) -> Dict:
         """
