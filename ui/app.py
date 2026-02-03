@@ -1046,6 +1046,7 @@ def market_data():
                 from greeks.black_scholes import BlackScholesCalculator
                 from collections import defaultdict
 
+                print(f"[Auto-Hedge] Checking positions... (threshold={os.getenv('HEDGE_LOSS_THRESHOLD', '3.0')}x)")
                 positions = provider.kite.positions()
                 net_positions = positions.get('net', [])
                 nifty_shorts = [p for p in net_positions
@@ -1074,14 +1075,17 @@ def market_data():
 
                             # Skip if this losing leg was already hedged (permanent)
                             if symbol in hedged_positions:
+                                print(f"[Auto-Hedge] Skipping {symbol} - already hedged")
                                 continue
 
                             avg_price = pos.get('average_price', 0)
                             ltp = pos.get('last_price', 0)
+                            print(f"[Auto-Hedge DEBUG] {symbol}: avg={avg_price}, ltp={ltp}, threshold={hedge_threshold}")
                             if avg_price <= 0:
                                 continue
 
                             loss_ratio = ltp / avg_price
+                            print(f"[Auto-Hedge DEBUG] {symbol}: loss_ratio={loss_ratio:.2f}x vs threshold={hedge_threshold}x")
                             if loss_ratio < hedge_threshold:
                                 continue
 
