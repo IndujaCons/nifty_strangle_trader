@@ -609,6 +609,83 @@ class KiteDataProvider:
 
         return result
 
+    def place_single_leg_order(
+        self,
+        expiry: date,
+        strike: float,
+        option_type: str,
+        transaction_type: str = "SELL",
+        quantity: int = None
+    ) -> dict:
+        """
+        Place a single-leg option order.
+
+        Args:
+            expiry: Option expiry date
+            strike: Strike price
+            option_type: 'CE' or 'PE'
+            transaction_type: 'SELL' or 'BUY'
+            quantity: Number of lots (default: LOT_QUANTITY from .env)
+
+        Returns:
+            dict with order details and status
+        """
+        lot_size = NIFTY_CONFIG["lot_size"]
+        num_lots = quantity if quantity is not None else LOT_QUANTITY
+        total_qty = lot_size * num_lots
+
+        # Get trading symbol
+        symbol = self.get_trading_symbol(expiry, strike, option_type)
+
+        if not symbol:
+            return {
+                "success": False,
+                "error": f"Could not find trading symbol for {strike} {option_type}",
+            }
+
+        result = {
+            "success": False,
+            "order_id": None,
+            "symbol": symbol,
+            "strike": strike,
+            "option_type": option_type,
+            "quantity": total_qty,
+            "transaction_type": transaction_type,
+            "paper_trading": PAPER_TRADING,
+        }
+
+        if PAPER_TRADING:
+            logger.info(f"[PAPER] {transaction_type} {symbol} x {total_qty}")
+            result["success"] = True
+            result["order_id"] = f"PAPER_{option_type}_{transaction_type}_001"
+            return result
+
+        try:
+            kite_txn_type = (
+                self.kite.TRANSACTION_TYPE_SELL
+                if transaction_type == "SELL"
+                else self.kite.TRANSACTION_TYPE_BUY
+            )
+
+            order_id = self.kite.place_order(
+                variety=self.kite.VARIETY_REGULAR,
+                exchange=self.kite.EXCHANGE_NFO,
+                tradingsymbol=symbol,
+                transaction_type=kite_txn_type,
+                quantity=total_qty,
+                product=self.kite.PRODUCT_NRML,
+                order_type=self.kite.ORDER_TYPE_MARKET,
+            )
+            logger.info(f"{transaction_type} order placed for {symbol}: {order_id}")
+            result["success"] = True
+            result["order_id"] = order_id
+
+        except Exception as e:
+            logger.error(f"Single leg order failed: {e}")
+            result["error"] = str(e)
+
+        return result
+
     def place_wing_order(
         self,
         expiry: date,

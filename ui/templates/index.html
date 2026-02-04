@@ -502,6 +502,28 @@
             background: #d0d0d0;
         }
 
+        .force-btn {
+            width: 24px;
+            height: 24px;
+            border: 1px solid #ff9800;
+            border-radius: 4px;
+            background: #fff3e0;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-weight: bold;
+            color: #e65100;
+            margin-left: 8px;
+        }
+
+        .force-btn:hover {
+            background: #ffe0b2;
+            border-color: #f57c00;
+        }
+
+        .force-btn:active {
+            background: #ffcc80;
+        }
+
         .move-arrow {
             font-size: 1.5rem;
             color: #888;
@@ -761,6 +783,29 @@
 
         .strike-btn:active {
             background: #d0c8bc;
+        }
+
+        .force-btn {
+            width: 22px;
+            height: 22px;
+            border: 1px solid #ff9800;
+            border-radius: 3px;
+            background: #fff3e0;
+            cursor: pointer;
+            font-size: 0.65rem;
+            font-weight: bold;
+            color: #e65100;
+            margin-left: 6px;
+            padding: 0;
+        }
+
+        .force-btn:hover {
+            background: #ffe0b2;
+            border-color: #f57c00;
+        }
+
+        .force-btn:active {
+            background: #ffcc80;
         }
 
         .strike-ltp {
@@ -1218,6 +1263,7 @@
                             <span id="callStrike">--</span>
                             <button class="strike-btn" onclick="adjustStrike('call', 50)">+</button>
                             <span class="strike-ltp">@ <span id="callLtp">--</span></span>
+                            <button class="force-btn" onclick="forceTrade('CE')" title="Force sell this CALL">F</button>
                         </span>
                     </div>
                     <div class="strangle-row">
@@ -1231,6 +1277,7 @@
                             <span id="putStrike">--</span>
                             <button class="strike-btn" onclick="adjustStrike('put', 50)">+</button>
                             <span class="strike-ltp">@ <span id="putLtp">--</span></span>
+                            <button class="force-btn" onclick="forceTrade('PE')" title="Force sell this PUT">F</button>
                         </span>
                     </div>
                     <div class="strangle-row">
@@ -2696,6 +2743,55 @@
                 btn.textContent = 'Confirm Trade';
             });
         }
+
+        function forceTrade(optionType) {
+            const strike = optionType === 'CE'
+                ? document.getElementById('callStrike').textContent
+                : document.getElementById('putStrike').textContent;
+            const ltp = optionType === 'CE'
+                ? document.getElementById('callLtp').textContent
+                : document.getElementById('putLtp').textContent;
+
+            if (strike === '--' || !selectedExpiry) {
+                alert('Strike or expiry not loaded');
+                return;
+            }
+
+            const confirmed = confirm(`Force SELL ${optionType} ${strike} @ ₹${ltp}?\n\nExpiry: ${selectedExpiry}`);
+            if (!confirmed) return;
+
+            // Disable the button temporarily
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            fetch('/api/trade/force', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    expiry: selectedExpiry,
+                    option_type: optionType,
+                    strike: parseInt(strike)
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`${optionType} order placed!\nOrder ID: ${data.order_id}`);
+                    refreshPositions();
+                } else {
+                    alert(`Order failed: ${data.error}`);
+                }
+                btn.disabled = false;
+                btn.textContent = 'F';
+            })
+            .catch(err => {
+                alert(`Error: ${err.message}`);
+                btn.disabled = false;
+                btn.textContent = 'F';
+            });
+        }
+
         function showInfo(title, text, event) {
             const overlay = document.getElementById('infoModalOverlay');
             const modal = document.getElementById('infoModal');

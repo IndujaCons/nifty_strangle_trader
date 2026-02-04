@@ -1419,6 +1419,49 @@ def execute_trade():
         return jsonify({"success": False, "error": str(e)})
 
 
+@app.route("/api/trade/force", methods=["POST"])
+def force_trade():
+    """Force execute a single-leg trade (CALL or PUT only)."""
+    global provider
+
+    if provider is None:
+        init_provider()
+
+    try:
+        access_token = os.getenv("KITE_ACCESS_TOKEN", "")
+        if not access_token:
+            return jsonify({"success": False, "error": "Not connected"})
+
+        provider.kite.set_access_token(access_token)
+
+        req_data = request.json or {}
+        expiry_str = req_data.get("expiry")
+        option_type = req_data.get("option_type")  # 'CE' or 'PE'
+        strike = req_data.get("strike")
+
+        if not expiry_str or not option_type or not strike:
+            return jsonify({"success": False, "error": "Missing expiry, option_type, or strike"})
+
+        # Parse expiry
+        try:
+            expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"success": False, "error": f"Invalid expiry format: {expiry_str}"})
+
+        # Place single-leg order
+        result = provider.place_single_leg_order(
+            expiry=expiry,
+            strike=strike,
+            option_type=option_type,
+            transaction_type="SELL",
+        )
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
 @app.route("/api/history")
 def history():
     """Get trade history grouped by expiry including closed positions.
