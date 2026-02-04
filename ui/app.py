@@ -1448,12 +1448,16 @@ def force_trade():
         except ValueError:
             return jsonify({"success": False, "error": f"Invalid expiry format: {expiry_str}"})
 
-        # Place single-leg order
+        # Get configured lot quantity
+        lot_quantity = int(os.getenv("LOT_QUANTITY", "1"))
+
+        # Place single-leg order with configured quantity
         result = provider.place_single_leg_order(
             expiry=expiry,
             strike=strike,
             option_type=option_type,
             transaction_type="SELL",
+            quantity=lot_quantity,
         )
 
         return jsonify(result)
