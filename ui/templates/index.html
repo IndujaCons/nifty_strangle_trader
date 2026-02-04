@@ -1397,6 +1397,42 @@
         </div>
     </div>
 
+    <!-- Force Trade Modal -->
+    <div class="modal" id="forceTradeModal">
+        <div class="modal-content">
+            <div class="modal-header">Force <span id="forceTradeType">CALL</span> Trade</div>
+            <div class="modal-body">
+                <div id="forceTradeAlert"></div>
+                <div class="strangle-details">
+                    <div class="strangle-row">
+                        <span class="label">Action</span>
+                        <span class="value" style="color: #d32f2f; font-weight: 600;">SELL</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Strike</span>
+                        <span class="value" id="forceStrike">--</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Premium</span>
+                        <span class="value positive" id="forcePremium">--</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Expiry</span>
+                        <span class="value" id="forceExpiry">--</span>
+                    </div>
+                    <div class="strangle-row">
+                        <span class="label">Quantity</span>
+                        <span class="value" id="forceQty">--</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeForceModal()">Cancel</button>
+                <button class="btn btn-success" id="confirmForceBtn" onclick="executeForceTrade()">Confirm</button>
+            </div>
+        </div>
+    </div>
+
     <!-- SIP Alert Modal -->
     <div class="modal" id="sipAlertModal">
         <div class="modal-content sip-alert-content">
@@ -2744,6 +2780,9 @@
             });
         }
 
+        // Store pending force trade data
+        let pendingForceTrade = null;
+
         function forceTrade(optionType) {
             const strike = optionType === 'CE'
                 ? document.getElementById('callStrike').textContent
@@ -2757,38 +2796,81 @@
                 return;
             }
 
-            const confirmed = confirm(`Force SELL ${optionType} ${strike} @ ₹${ltp}?\n\nExpiry: ${selectedExpiry}`);
-            if (!confirmed) return;
+            // Store for execution
+            pendingForceTrade = {
+                optionType: optionType,
+                strike: parseInt(strike),
+                ltp: ltp,
+                expiry: selectedExpiry
+            };
 
-            // Disable the button temporarily
-            const btn = event.target;
+            // Populate modal
+            document.getElementById('forceTradeType').textContent = optionType === 'CE' ? 'CALL' : 'PUT';
+            document.getElementById('forceStrike').textContent = strike;
+            document.getElementById('forcePremium').textContent = '₹' + ltp;
+            document.getElementById('forceExpiry').textContent = selectedExpiry;
+            document.getElementById('forceQty').textContent = document.getElementById('lotsDisplay').textContent + ' lots';
+            document.getElementById('forceTradeAlert').innerHTML = '';
+
+            // Show modal
+            document.getElementById('forceTradeModal').classList.add('show');
+        }
+
+        function closeForceModal() {
+            document.getElementById('forceTradeModal').classList.remove('show');
+            pendingForceTrade = null;
+        }
+
+        function executeForceTrade() {
+            if (!pendingForceTrade) return;
+
+            const btn = document.getElementById('confirmForceBtn');
             btn.disabled = true;
-            btn.textContent = '...';
+            btn.textContent = 'Placing...';
 
             fetch('/api/trade/force', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    expiry: selectedExpiry,
-                    option_type: optionType,
-                    strike: parseInt(strike)
+                    expiry: pendingForceTrade.expiry,
+                    option_type: pendingForceTrade.optionType,
+                    strike: pendingForceTrade.strike
                 })
             })
             .then(res => res.json())
             .then(data => {
+                const alertDiv = document.getElementById('forceTradeAlert');
+
                 if (data.success) {
-                    alert(`${optionType} order placed!\nOrder ID: ${data.order_id}`);
-                    refreshPositions();
+                    alertDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            Order placed successfully!<br>
+                            Order ID: ${data.order_id}
+                        </div>
+                    `;
+                    setTimeout(() => {
+                        closeForceModal();
+                        refreshPositions();
+                    }, 1500);
                 } else {
-                    alert(`Order failed: ${data.error}`);
+                    alertDiv.innerHTML = `
+                        <div class="alert alert-error">
+                            Order failed: ${data.error}
+                        </div>
+                    `;
                 }
+
                 btn.disabled = false;
-                btn.textContent = 'F';
+                btn.textContent = 'Confirm';
             })
             .catch(err => {
-                alert(`Error: ${err.message}`);
+                document.getElementById('forceTradeAlert').innerHTML = `
+                    <div class="alert alert-error">
+                        Error: ${err.message}
+                    </div>
+                `;
                 btn.disabled = false;
-                btn.textContent = 'F';
+                btn.textContent = 'Confirm';
             });
         }
 
