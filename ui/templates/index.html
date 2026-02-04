@@ -2821,8 +2821,15 @@
             pendingForceTrade = null;
         }
 
+        let forceTradeInProgress = false;
+
         function executeForceTrade() {
-            if (!pendingForceTrade) return;
+            if (!pendingForceTrade || forceTradeInProgress) return;
+
+            // Lock immediately to prevent double execution
+            forceTradeInProgress = true;
+            const tradeData = { ...pendingForceTrade };  // Copy data
+            pendingForceTrade = null;  // Clear immediately
 
             const btn = document.getElementById('confirmForceBtn');
             btn.disabled = true;
@@ -2832,9 +2839,9 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    expiry: pendingForceTrade.expiry,
-                    option_type: pendingForceTrade.optionType,
-                    strike: pendingForceTrade.strike
+                    expiry: tradeData.expiry,
+                    option_type: tradeData.optionType,
+                    strike: tradeData.strike
                 })
             })
             .then(res => res.json())
@@ -2851,6 +2858,7 @@
                     setTimeout(() => {
                         closeForceModal();
                         refreshPositions();
+                        forceTradeInProgress = false;
                     }, 1500);
                 } else {
                     alertDiv.innerHTML = `
@@ -2858,6 +2866,7 @@
                             Order failed: ${data.error}
                         </div>
                     `;
+                    forceTradeInProgress = false;
                 }
 
                 btn.disabled = false;
@@ -2871,6 +2880,7 @@
                 `;
                 btn.disabled = false;
                 btn.textContent = 'Confirm';
+                forceTradeInProgress = false;
             });
         }
 
