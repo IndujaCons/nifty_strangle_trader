@@ -1553,6 +1553,7 @@ def history():
     # Overlay live data (current open positions)
     for expiry_key, data in live_expiry_data.items():
         expiry_display = data['expiry']
+        print(f"[History DEBUG] Live overlay: key={expiry_key}, display='{expiry_display}', in_merged={expiry_display in merged_data}", flush=True)
 
         if expiry_display in merged_data:
             # Add live open P&L to existing entry
@@ -1569,9 +1570,9 @@ def history():
             # New expiry from live data
             merged_data[expiry_display] = data
 
-    print(f"[History DEBUG] Merged data keys: {list(merged_data.keys())}")
+    print(f"[History DEBUG] Merged data keys: {list(merged_data.keys())}", flush=True)
     for exp, d in merged_data.items():
-        print(f"[History DEBUG] Merged {exp}: booked={d.get('booked', 0):.2f}, open={d.get('open', 0):.2f}")
+        print(f"[History DEBUG] Merged {exp}: booked={d.get('booked', 0):.2f}, open={d.get('open', 0):.2f}", flush=True)
 
     # Calculate totals
     total_booked = sum(e['booked'] for e in merged_data.values())
