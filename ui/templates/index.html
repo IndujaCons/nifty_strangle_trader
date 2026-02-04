@@ -2295,15 +2295,18 @@
             }
 
             const targetProfit = expiryMaxProfit * (window.exitTargetPct / 100);
-            const maxProfitRow = hasOpenPositions ? `
-                        <div class="expiry-row">
-                            <span style="color: #1976d2; font-weight: 600;">Max Profit</span>
-                            <span style="color: #1976d2; font-weight: 600;">₹${expiryMaxProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})} <span style="font-size: 0.6rem; color: #666;">(${profitPct}%)</span></span>
-                        </div>
+            // Only show target row if max profit is positive (target makes no sense when in loss)
+            const targetRow = expiryMaxProfit > 0 ? `
                         <div class="expiry-row" style="border-bottom: 1px solid #eee; padding-bottom: 4px; margin-bottom: 4px;">
                             <span style="color: #4caf50; font-weight: 600;">Target (${window.exitTargetPct}%)</span>
                             <span style="color: #4caf50; font-weight: 600;">₹${targetProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})}</span>
                         </div>` : '';
+            const maxProfitRow = hasOpenPositions ? `
+                        <div class="expiry-row">
+                            <span style="color: ${expiryMaxProfit >= 0 ? '#1976d2' : '#d32f2f'}; font-weight: 600;">Max Profit</span>
+                            <span style="color: ${expiryMaxProfit >= 0 ? '#1976d2' : '#d32f2f'}; font-weight: 600;">₹${expiryMaxProfit.toLocaleString('en-IN', {maximumFractionDigits: 0})} <span style="font-size: 0.6rem; color: #666;">(${profitPct}%)</span></span>
+                        </div>
+                        ${targetRow}` : '';
 
             // Exit All button (only show if there are open positions, never for closed)
             const exitButton = (hasOpenPositions && !isClosed) ? `
