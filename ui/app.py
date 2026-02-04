@@ -1531,9 +1531,9 @@ def history():
 
     # Get persisted history from CSV
     csv_history = history_manager.get_history_by_expiry()
-    print(f"[History DEBUG] CSV history keys: {list(csv_history.keys())}")
+    print(f"[History DEBUG] CSV history keys: {list(csv_history.keys())}", flush=True)
     for exp, d in csv_history.items():
-        print(f"[History DEBUG] {exp}: booked={d.get('booked', 0):.2f}, partial={d.get('partial_booked', 0):.2f}")
+        print(f"[History DEBUG] {exp}: booked={d.get('booked', 0):.2f}, partial={d.get('partial_booked', 0):.2f}", flush=True)
 
     # Merge live data with CSV history
     # Live data takes precedence for current day, CSV provides historical context
