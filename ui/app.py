@@ -749,6 +749,7 @@ def market_data():
                         expiry=data.expiry,
                         call_strike=data.call_strike,
                         put_strike=data.put_strike,
+                        quantity=config["lot_quantity"],
                     )
 
                     if result.get("success"):
@@ -770,6 +771,7 @@ def market_data():
                                         expiry=data.expiry,
                                         call_strike=wing_data.call_strike,
                                         put_strike=wing_data.put_strike,
+                                        quantity=config["lot_quantity"],
                                     )
                                     if wing_result.get("success"):
                                         print(f"[Auto-Trade] Wings bought: {wing_data.call_strike}CE/{wing_data.put_strike}PE @ {wing_delta*100:.0f}δ")
@@ -1402,10 +1404,12 @@ def execute_trade():
         put_strike = req_data.get("put_strike") or data.put_strike
 
         # Place order with specified expiry and potentially custom strikes
+        lot_quantity = int(os.getenv("LOT_QUANTITY", "1"))
         result = provider.place_strangle_order(
             expiry=data.expiry,  # Use expiry from strangle data (validated)
             call_strike=call_strike,
             put_strike=put_strike,
+            quantity=lot_quantity,
         )
 
         if result["success"]:
