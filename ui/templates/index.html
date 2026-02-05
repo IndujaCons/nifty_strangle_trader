@@ -538,12 +538,56 @@
         }
 
         /* Positions Panel */
+        .position-group-header {
+            font-weight: 600;
+            font-size: 0.7rem;
+            color: #333;
+            background: #eee;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-top: 8px;
+            margin-bottom: 4px;
+        }
+
+        .position-group-header:first-child {
+            margin-top: 0;
+        }
+
         .position-card {
             background: #fafafa;
             border-radius: 4px;
             padding: 8px;
             margin-bottom: 6px;
             border: 1px solid #eee;
+        }
+
+        .position-card.sell {
+            border-left: 3px solid #d32f2f;
+            background: #fff5f5;
+        }
+
+        .position-card.buy {
+            border-left: 3px solid #1976d2;
+            background: #f5f8ff;
+        }
+
+        .position-badge {
+            font-size: 0.55rem;
+            font-weight: 600;
+            padding: 1px 4px;
+            border-radius: 3px;
+            margin-left: 5px;
+            vertical-align: middle;
+        }
+
+        .position-badge.sell {
+            background: #d32f2f;
+            color: #fff;
+        }
+
+        .position-badge.buy {
+            background: #1976d2;
+            color: #fff;
         }
 
         .position-header {
@@ -2226,33 +2270,58 @@
 
             const decayThreshold = parseInt(document.getElementById('decayThreshold').value) || 60;
 
-            let html = '';
+            // Group positions by expiry
+            const groups = new Map();
             data.positions.forEach(pos => {
-                const pnlClass = pos.pnl >= 0 ? 'positive' : 'negative';
-                const pnlSign = pos.pnl >= 0 ? '+' : '';
-                const decayPct = pos.decay_pct || 0;
-                const decaySign = decayPct >= 0 ? '-' : '+';
-                const isShort = pos.quantity < 0;
-                // Enable Move button only for short positions with decay > threshold
-                const canMove = isShort && decayPct >= decayThreshold;
-                const moveButtonClass = canMove ? 'move-btn enabled' : 'move-btn';
-                const moveButtonDisabled = canMove ? '' : 'disabled';
                 const displaySymbol = decodeSymbol(pos.symbol);
+                // Extract expiry like "10-Feb" or "Feb" from decoded symbol "NIFTY 10-Feb 24700 PE"
+                const expiryMatch = displaySymbol.match(/(\d+-\w+|\d+\w{3}\d+)/);
+                const expiry = expiryMatch ? expiryMatch[1] : 'Other';
+                if (!groups.has(expiry)) groups.set(expiry, []);
+                groups.get(expiry).push(pos);
+            });
 
-                html += `
-                    <div class="position-card">
-                        <div class="position-header">
-                            <span class="position-symbol">${displaySymbol}</span>
-                            <span class="position-pnl ${pnlClass}">${pnlSign}₹${pos.pnl.toLocaleString('en-IN', {maximumFractionDigits: 2})} <span class="decay-inline">(${decaySign}${Math.abs(decayPct).toFixed(0)}%)</span></span>
+            // Sort within each group: sells (qty < 0) first, then buys
+            groups.forEach((positions, expiry) => {
+                positions.sort((a, b) => {
+                    const aIsSell = a.quantity < 0 ? 0 : 1;
+                    const bIsSell = b.quantity < 0 ? 0 : 1;
+                    return aIsSell - bIsSell;
+                });
+            });
+
+            let html = '';
+            groups.forEach((positions, expiry) => {
+                html += `<div class="position-group-header">${expiry}</div>`;
+                positions.forEach(pos => {
+                    const pnlClass = pos.pnl >= 0 ? 'positive' : 'negative';
+                    const pnlSign = pos.pnl >= 0 ? '+' : '';
+                    const decayPct = pos.decay_pct || 0;
+                    const decaySign = decayPct >= 0 ? '-' : '+';
+                    const isShort = pos.quantity < 0;
+                    const sideClass = isShort ? 'sell' : 'buy';
+                    const sideLabel = isShort ? 'SELL' : 'BUY';
+                    // Enable Move button only for short positions with decay > threshold
+                    const canMove = isShort && decayPct >= decayThreshold;
+                    const moveButtonClass = canMove ? 'move-btn enabled' : 'move-btn';
+                    const moveButtonDisabled = canMove ? '' : 'disabled';
+                    const displaySymbol = decodeSymbol(pos.symbol);
+
+                    html += `
+                        <div class="position-card ${sideClass}">
+                            <div class="position-header">
+                                <span class="position-symbol">${displaySymbol} <span class="position-badge ${sideClass}">${sideLabel}</span></span>
+                                <span class="position-pnl ${pnlClass}">${pnlSign}₹${pos.pnl.toLocaleString('en-IN', {maximumFractionDigits: 2})} <span class="decay-inline">(${decaySign}${Math.abs(decayPct).toFixed(0)}%)</span></span>
+                            </div>
+                            <div class="position-details">
+                                <span>Qty: ${pos.quantity}</span>
+                                <span>Avg: ₹${pos.average_price.toFixed(2)}</span>
+                                <span>LTP: ₹${pos.ltp.toFixed(2)}</span>
+                                <button class="${moveButtonClass}" ${moveButtonDisabled} onclick="movePosition('${pos.symbol}')">Move</button>
+                            </div>
                         </div>
-                        <div class="position-details">
-                            <span>Qty: ${pos.quantity}</span>
-                            <span>Avg: ₹${pos.average_price.toFixed(2)}</span>
-                            <span>LTP: ₹${pos.ltp.toFixed(2)}</span>
-                            <button class="${moveButtonClass}" ${moveButtonDisabled} onclick="movePosition('${pos.symbol}')">Move</button>
-                        </div>
-                    </div>
-                `;
+                    `;
+                });
             });
             container.innerHTML = html;
 
