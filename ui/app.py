@@ -1568,10 +1568,11 @@ def history():
                         # Also persist to CSV for next-day survival
                         history_manager.update_from_positions([pos])
                     live_expiry_data[expiry_key]['open_positions'] += 1
-                    # Max profit for sold options = premium collected = average_price × abs(quantity)
-                    if quantity < 0:  # Sold position
-                        max_profit_for_position = avg_price * abs(quantity)
-                        live_expiry_data[expiry_key]['max_profit'] += max_profit_for_position
+                    # Max profit = sold premium - bought premium (net credit)
+                    if quantity < 0:  # Sold position: add premium collected
+                        live_expiry_data[expiry_key]['max_profit'] += avg_price * abs(quantity)
+                    else:  # Bought position: subtract premium paid
+                        live_expiry_data[expiry_key]['max_profit'] -= avg_price * quantity
                 else:
                     # Closed position - sync to CSV on the fly (dedup handled by add_trade)
                     # Don't add to live_expiry_data to avoid double-counting with CSV
