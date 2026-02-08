@@ -520,6 +520,25 @@ class KiteDataProvider:
         inst = options.get((expiry, strike, opt_type))
         return inst['tradingsymbol'] if inst else None
 
+    def find_wing_strike(
+        self,
+        expiry: date,
+        option_type: str,
+        target_delta: float = 0.02
+    ) -> Optional[float]:
+        """
+        Find a wing strike at target delta for protection.
+        For CE: finds further OTM call (higher strike, lower delta)
+        For PE: finds further OTM put (lower strike, lower |delta|)
+
+        Returns strike price or None if not found.
+        """
+        # Reuse find_strangle() which already calculates deltas
+        wing_data = self.find_strangle(expiry=expiry, target_delta=target_delta)
+        if wing_data:
+            return wing_data.call_strike if option_type == 'CE' else wing_data.put_strike
+        return None
+
     def place_strangle_order(
         self,
         expiry: date,

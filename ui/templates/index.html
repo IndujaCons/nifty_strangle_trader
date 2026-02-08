@@ -1468,6 +1468,10 @@
                         <span class="label">Quantity</span>
                         <span class="value" id="forceQty">--</span>
                     </div>
+                    <div class="strangle-row" id="forceHedgeRow" style="display: none;">
+                        <span class="label">Hedge</span>
+                        <span class="value" id="forceHedge" style="color: #2e7d32; font-weight: 600;">ON - Will buy wing</span>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -2884,6 +2888,11 @@
             document.getElementById('forceQty').textContent = document.getElementById('lotsDisplay').textContent + ' lots';
             document.getElementById('forceTradeAlert').innerHTML = '';
 
+            // Show hedge indicator if Buy Wings is enabled
+            const buyWingsEnabled = document.getElementById('buyWings').checked;
+            const hedgeRow = document.getElementById('forceHedgeRow');
+            hedgeRow.style.display = buyWingsEnabled ? 'flex' : 'none';
+
             // Show modal
             document.getElementById('forceTradeModal').classList.add('show');
         }
@@ -2921,10 +2930,21 @@
                 const alertDiv = document.getElementById('forceTradeAlert');
 
                 if (data.success) {
+                    let successMsg = `SELL ${tradeData.strike} ${tradeData.optionType} - Order ID: ${data.order_id}`;
+
+                    // Show wing order info if present
+                    if (data.wing_order) {
+                        if (data.wing_order.success) {
+                            successMsg += `<br>BUY ${data.wing_strike} ${tradeData.optionType} (wing) - Order ID: ${data.wing_order.order_id}`;
+                        } else {
+                            successMsg += `<br><span style="color: #d32f2f;">Wing order failed: ${data.wing_error || 'Unknown error'}</span>`;
+                        }
+                    }
+
                     alertDiv.innerHTML = `
                         <div class="alert alert-success">
-                            Order placed successfully!<br>
-                            Order ID: ${data.order_id}
+                            Orders placed successfully!<br>
+                            ${successMsg}
                         </div>
                     `;
                     setTimeout(() => {

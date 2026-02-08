@@ -1494,7 +1494,7 @@ def force_trade():
         # Get configured lot quantity
         lot_quantity = int(os.getenv("LOT_QUANTITY", "1"))
 
-        # Place single-leg order with configured quantity
+        # Place single-leg SELL order with configured quantity
         result = provider.place_single_leg_order(
             expiry=expiry,
             strike=strike,
@@ -1502,6 +1502,25 @@ def force_trade():
             transaction_type="SELL",
             quantity=lot_quantity,
         )
+
+        # If sell succeeded and Buy Wings is enabled, buy protective wing
+        if result.get("success") and os.getenv("BUY_WINGS", "false").lower() == "true":
+            wing_delta = float(os.getenv("WING_DELTA", "0.02"))
+            wing_strike = provider.find_wing_strike(expiry, option_type, wing_delta)
+
+            if wing_strike:
+                wing_result = provider.place_single_leg_order(
+                    expiry=expiry,
+                    strike=wing_strike,
+                    option_type=option_type,
+                    transaction_type="BUY",
+                    quantity=lot_quantity,
+                )
+                # Add wing info to result
+                result["wing_order"] = wing_result
+                result["wing_strike"] = wing_strike
+                if not wing_result.get("success"):
+                    result["wing_error"] = wing_result.get("error", "Wing order failed")
 
         return jsonify(result)
 
