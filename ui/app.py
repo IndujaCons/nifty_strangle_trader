@@ -99,10 +99,14 @@ class OITracker:
 
         # Build strike analysis
         strikes_analysis = []
+        # OI change tracking
         total_ce_buildup_above = 0
         total_pe_buildup_below = 0
         total_ce_buildup = 0
         total_pe_buildup = 0
+        # Total OI tracking (absolute levels)
+        total_ce_oi_above = 0
+        total_pe_oi_below = 0
 
         for strike in tracked_strikes:
             baseline = self.baseline_snapshot.get(strike, {})
@@ -134,7 +138,7 @@ class OITracker:
                 "is_atm": strike == atm_100
             })
 
-            # Accumulate for signal calculation
+            # Accumulate OI change for signal calculation
             total_ce_buildup += ce_chg
             total_pe_buildup += pe_chg
             if strike >= atm_100:
@@ -142,13 +146,20 @@ class OITracker:
             if strike <= atm_100:
                 total_pe_buildup_below += pe_chg
 
+            # Accumulate total OI (absolute levels)
+            if strike > atm_100:  # CE resistance above ATM
+                total_ce_oi_above += current_ce
+            if strike < atm_100:  # PE support below ATM
+                total_pe_oi_below += current_pe
+
         if not strikes_analysis:
             return {"error": "No strike data matched baseline"}
 
-        # Calculate signal based on OI buildup patterns
+        # Calculate signal based on OI buildup patterns AND total OI levels
         signal, confidence, reason, action = self._calculate_signal(
             total_ce_buildup_above, total_pe_buildup_below,
-            total_ce_buildup, total_pe_buildup
+            total_ce_buildup, total_pe_buildup,
+            total_ce_oi_above, total_pe_oi_below
         )
 
         return {
@@ -163,58 +174,86 @@ class OITracker:
             "baseline_spot": self.baseline_spot
         }
 
-    def _calculate_signal(self, ce_above, pe_below, total_ce, total_pe):
-        """Calculate trading signal from OI buildup patterns."""
-        # Thresholds for significant buildup (in contracts)
-        threshold = 500000  # 5 lakh OI change
+    def _calculate_signal(self, ce_chg_above, pe_chg_below, total_ce_chg, total_pe_chg,
+                           ce_oi_above=0, pe_oi_below=0):
+        """Calculate trading signal from OI change AND total OI levels.
 
-        signal = "NEUTRAL"
-        confidence = "Low"
-        reason = "No clear pattern"
-        action = "Wait for confirmation"
+        Two-factor analysis:
+        1. Total OI: Where the walls are (CE above = resistance, PE below = support)
+        2. OI Change: Today's sentiment/flow
+        """
+        # Thresholds
+        chg_threshold = 500000  # 5 lakh OI change
+        oi_threshold = 10000000  # 1 crore total OI for significant wall
 
-        # Strong BEARISH: CE writing above ATM (resistance building)
-        if ce_above > threshold and ce_above > abs(pe_below):
-            signal = "BEARISH"
-            if ce_above > threshold * 2:
-                confidence = "High"
-                reason = "Massive CE writing above ATM = Strong resistance"
-                action = "Exit PE shorts, hold CE shorts"
+        # Score each factor: +1 bullish, -1 bearish, 0 neutral
+        oi_score = 0
+        chg_score = 0
+        oi_reason = ""
+        chg_reason = ""
+
+        # Factor 1: Total OI (absolute levels) - where are the walls?
+        if ce_oi_above > 0 or pe_oi_below > 0:
+            if pe_oi_below > ce_oi_above * 1.3:  # PE support > CE resistance by 30%
+                oi_score = 1
+                oi_reason = f"PE support ({pe_oi_below/100000:.0f}L) > CE resistance ({ce_oi_above/100000:.0f}L)"
+            elif ce_oi_above > pe_oi_below * 1.3:  # CE resistance > PE support by 30%
+                oi_score = -1
+                oi_reason = f"CE resistance ({ce_oi_above/100000:.0f}L) > PE support ({pe_oi_below/100000:.0f}L)"
             else:
-                confidence = "Medium"
-                reason = "CE writing above ATM = Resistance"
-                action = "Be cautious on PE shorts"
+                oi_reason = f"Balanced OI walls (PE: {pe_oi_below/100000:.0f}L, CE: {ce_oi_above/100000:.0f}L)"
 
-        # Strong BULLISH: PE writing below ATM (support building)
-        elif pe_below > threshold and pe_below > abs(ce_above):
+        # Factor 2: OI Change (today's flow)
+        if pe_chg_below > chg_threshold and pe_chg_below > ce_chg_above:
+            chg_score = 1
+            chg_reason = f"PE adding +{pe_chg_below/100000:.0f}L below ATM"
+        elif ce_chg_above > chg_threshold and ce_chg_above > pe_chg_below:
+            chg_score = -1
+            chg_reason = f"CE adding +{ce_chg_above/100000:.0f}L above ATM"
+        elif total_ce_chg < -chg_threshold:
+            chg_score = 1
+            chg_reason = "CE unwinding (bears exiting)"
+        elif total_pe_chg < -chg_threshold:
+            chg_score = -1
+            chg_reason = "PE unwinding (bulls exiting)"
+        else:
+            chg_reason = "No significant OI change"
+
+        # Combined signal
+        total_score = oi_score + chg_score
+
+        if total_score >= 2:
             signal = "BULLISH"
-            if pe_below > threshold * 2:
-                confidence = "High"
-                reason = "Massive PE writing below ATM = Strong support"
-                action = "Exit CE shorts, hold PE shorts"
-            else:
-                confidence = "Medium"
-                reason = "PE writing below ATM = Support"
-                action = "Be cautious on CE shorts"
-
-        # Mixed signals
-        elif ce_above > threshold / 2 and pe_below > threshold / 2:
-            signal = "RANGEBOUND"
-            confidence = "Medium"
-            reason = "Both CE & PE writing = Range formation"
-            action = "Hold straddle, expect range"
-
-        # Unwinding patterns
-        elif total_ce < -threshold:
+            confidence = "High"
+            reason = f"{oi_reason}. {chg_reason}"
+            action = "Exit CE shorts, hold PE shorts"
+        elif total_score == 1:
             signal = "BULLISH"
-            confidence = "Low"
-            reason = "CE unwinding = Bears exiting"
-            action = "Watch for breakout"
-        elif total_pe < -threshold:
+            confidence = "Medium" if oi_score == 1 else "Low"
+            reason = f"{oi_reason}. {chg_reason}"
+            action = "Favor PE shorts over CE shorts"
+        elif total_score <= -2:
             signal = "BEARISH"
-            confidence = "Low"
-            reason = "PE unwinding = Bulls exiting"
-            action = "Watch for breakdown"
+            confidence = "High"
+            reason = f"{oi_reason}. {chg_reason}"
+            action = "Exit PE shorts, hold CE shorts"
+        elif total_score == -1:
+            signal = "BEARISH"
+            confidence = "Medium" if oi_score == -1 else "Low"
+            reason = f"{oi_reason}. {chg_reason}"
+            action = "Favor CE shorts over PE shorts"
+        else:  # total_score == 0
+            if oi_score != 0 and chg_score != 0:
+                # Conflicting signals
+                signal = "MIXED"
+                confidence = "Low"
+                reason = f"Conflicting: {oi_reason}. But {chg_reason}"
+                action = "Wait for confirmation, range likely"
+            else:
+                signal = "NEUTRAL"
+                confidence = "Low"
+                reason = f"{oi_reason}. {chg_reason}" if oi_reason else "No clear pattern"
+                action = "Wait for confirmation"
 
         return signal, confidence, reason, action
 
