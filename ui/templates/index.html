@@ -1375,6 +1375,10 @@
                         <span class="label">Margin Required</span>
                         <span class="value">₹<span id="marginRequired">--</span></span>
                     </div>
+                    <div class="strangle-row" id="wingsRow" style="display: none; font-size: 0.7rem; color: #666;">
+                        <span class="label">Wings (hedge)</span>
+                        <span class="value" id="wingsInfo">--</span>
+                    </div>
                     <div class="strangle-row" style="background: #f0fdf0; margin: 10px -14px -14px; padding: 12px 14px; border-radius: 0 0 4px 4px; border-top: 1px solid #c8e6c8;">
                         <span class="label">Total Premium (<span id="lotsDisplay">6</span> lots)</span>
                         <span class="value positive" style="font-size: 1.1rem;">₹<span id="totalPremium">--</span></span>
@@ -2274,6 +2278,17 @@
                     document.getElementById('expiry').textContent = data.expiry;
                     document.getElementById('dte').textContent = data.dte;
                     document.getElementById('marginRequired').textContent = data.margin_required?.toLocaleString('en-IN', {maximumFractionDigits: 0}) || '--';
+
+                    // Show wings info if Buy Wings is enabled and margin includes hedge benefit
+                    const wingsRow = document.getElementById('wingsRow');
+                    const wingsInfo = document.getElementById('wingsInfo');
+                    if (data.wings && data.wings.enabled) {
+                        wingsRow.style.display = 'flex';
+                        wingsInfo.textContent = `${data.wings.call_strike}CE / ${data.wings.put_strike}PE`;
+                    } else {
+                        wingsRow.style.display = 'none';
+                    }
+
                     document.getElementById('totalPremium').textContent = data.total_premium_all_lots?.toLocaleString('en-IN', {maximumFractionDigits: 2});
 
                     document.getElementById('lastUpdate').textContent = data.timestamp;

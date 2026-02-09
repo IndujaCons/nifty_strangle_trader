@@ -1114,6 +1114,8 @@ def market_data():
 
         # Calculate margin required using Kite's margins API
         total_margin = 0
+        wing_call_strike = None
+        wing_put_strike = None
         try:
             ce_symbol = provider.get_trading_symbol(data.expiry, data.call_strike, "CE")
             pe_symbol = provider.get_trading_symbol(data.expiry, data.put_strike, "PE")
@@ -1138,6 +1140,40 @@ def market_data():
                     "quantity": total_qty
                 }
             ]
+
+            # If Buy Wings enabled, add hedge legs to margin calculation for benefit
+            buy_wings = os.getenv("BUY_WINGS", "false").lower() == "true"
+            if buy_wings:
+                wing_delta = float(os.getenv("WING_DELTA", "0.02"))
+                wing_data = provider.find_strangle(expiry=data.expiry, target_delta=wing_delta)
+                if wing_data:
+                    wing_call_strike = wing_data.call_strike
+                    wing_put_strike = wing_data.put_strike
+                    wing_ce_symbol = provider.get_trading_symbol(data.expiry, wing_call_strike, "CE")
+                    wing_pe_symbol = provider.get_trading_symbol(data.expiry, wing_put_strike, "PE")
+
+                    if wing_ce_symbol and wing_pe_symbol:
+                        # Add BUY legs for wings (creates iron condor)
+                        margin_params.extend([
+                            {
+                                "exchange": "NFO",
+                                "tradingsymbol": wing_ce_symbol,
+                                "transaction_type": "BUY",
+                                "variety": "regular",
+                                "product": "NRML",
+                                "order_type": "MARKET",
+                                "quantity": total_qty
+                            },
+                            {
+                                "exchange": "NFO",
+                                "tradingsymbol": wing_pe_symbol,
+                                "transaction_type": "BUY",
+                                "variety": "regular",
+                                "product": "NRML",
+                                "order_type": "MARKET",
+                                "quantity": total_qty
+                            }
+                        ])
 
             # Try basket_margins first (for combined margin with span benefit)
             if hasattr(provider.kite, 'basket_margins'):
@@ -1242,6 +1278,11 @@ def market_data():
             "total_qty": total_qty,
             "total_premium_all_lots": total_premium,
             "margin_required": total_margin,
+            "wings": {
+                "enabled": wing_call_strike is not None and wing_put_strike is not None,
+                "call_strike": wing_call_strike,
+                "put_strike": wing_put_strike,
+            } if os.getenv("BUY_WINGS", "false").lower() == "true" else None,
             "pcr": pcr_value,
             "oi_analysis": oi_analysis,
             "oi_expiry": str(nearest_expiry),
