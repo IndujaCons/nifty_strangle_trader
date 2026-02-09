@@ -869,9 +869,10 @@ def market_data():
                         if expiry_key in exited_expiries:
                             continue
 
-                        # Calculate collected premium and current value for this expiry
-                        expiry_collected = 0
-                        expiry_current_value = 0
+                        # Calculate net credit and current P&L for this expiry
+                        # Must include BOTH sell and buy legs for iron condors
+                        net_credit = 0  # Max profit = sell premium - buy premium
+                        current_pnl = 0  # Current unrealized P&L
 
                         for pos in positions_list:
                             qty = pos['quantity']
@@ -879,17 +880,19 @@ def market_data():
                             ltp = pos.get('last_price', 0)
 
                             if qty < 0:  # Short position (sold options)
-                                expiry_collected += avg_price * abs(qty)
-                                expiry_current_value += ltp * abs(qty)
+                                net_credit += avg_price * abs(qty)  # Premium collected
+                                current_pnl += (avg_price - ltp) * abs(qty)  # Profit when price drops
+                            elif qty > 0:  # Long position (bought options/wings)
+                                net_credit -= avg_price * qty  # Premium paid (reduces max profit)
+                                current_pnl += (ltp - avg_price) * qty  # P&L (usually negative)
 
-                        if expiry_collected > 0:
-                            # Profit = what we collected - what it costs to buy back
-                            expiry_profit = expiry_collected - expiry_current_value
+                        if net_credit > 0:
+                            # Profit target based on NET credit (accounts for wing cost)
                             exit_pct = float(os.getenv("EXIT_TARGET_PCT", "0.50"))
-                            profit_target = expiry_collected * exit_pct
+                            profit_target = net_credit * exit_pct
 
-                            if expiry_profit >= profit_target:
-                                print(f"[Auto-Trade] Expiry {expiry_key}: {int(exit_pct * 100)}% target reached! Profit: {expiry_profit:.2f}, Target: {profit_target:.2f}")
+                            if current_pnl >= profit_target:
+                                print(f"[Auto-Trade] Expiry {expiry_key}: {int(exit_pct * 100)}% target reached! Net P&L: {current_pnl:.2f}, Target: {profit_target:.2f} (Max: {net_credit:.2f})")
 
                                 orders_placed = []
                                 paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
