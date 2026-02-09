@@ -2281,8 +2281,9 @@
             const groups = new Map();
             data.positions.forEach(pos => {
                 const displaySymbol = decodeSymbol(pos.symbol);
-                // Extract expiry like "10-Feb" or "Feb" from decoded symbol "NIFTY 10-Feb 24700 PE"
-                const expiryMatch = displaySymbol.match(/(\d+-\w+|\d+\w{3}\d+)/);
+                // Extract expiry like "17-Feb" or "Feb" from decoded symbol "NIFTY 17-Feb 24700 PE"
+                // Match: "NIFTY 17-Feb ..." or "NIFTY Feb ..."
+                const expiryMatch = displaySymbol.match(/NIFTY\s+(\d{1,2}-[A-Za-z]+|[A-Z][a-z]{2})/);
                 const expiry = expiryMatch ? expiryMatch[1] : 'Other';
                 if (!groups.has(expiry)) groups.set(expiry, []);
                 groups.get(expiry).push(pos);
