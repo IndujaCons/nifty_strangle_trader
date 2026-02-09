@@ -864,6 +864,10 @@ def market_data():
                         exited_expiries = set()
                         auto_trade_state["exited_expiries_today"] = exited_expiries
 
+                    # Get realized P&L from history (closed/moved positions)
+                    history_manager = get_history_manager()
+                    history_by_expiry = history_manager.get_history_by_expiry()
+
                     for expiry_key, positions_list in expiry_groups.items():
                         # Skip if already exited this expiry today
                         if expiry_key in exited_expiries:
@@ -872,7 +876,7 @@ def market_data():
                         # Calculate net credit and current P&L for this expiry
                         # Must include BOTH sell and buy legs for iron condors
                         net_credit = 0  # Max profit = sell premium - buy premium
-                        current_pnl = 0  # Current unrealized P&L
+                        unrealized_pnl = 0  # Current unrealized P&L from open positions
 
                         for pos in positions_list:
                             qty = pos['quantity']
@@ -881,18 +885,34 @@ def market_data():
 
                             if qty < 0:  # Short position (sold options)
                                 net_credit += avg_price * abs(qty)  # Premium collected
-                                current_pnl += (avg_price - ltp) * abs(qty)  # Profit when price drops
+                                unrealized_pnl += (avg_price - ltp) * abs(qty)  # Profit when price drops
                             elif qty > 0:  # Long position (bought options/wings)
                                 net_credit -= avg_price * qty  # Premium paid (reduces max profit)
-                                current_pnl += (ltp - avg_price) * qty  # P&L (usually negative)
+                                unrealized_pnl += (ltp - avg_price) * qty  # P&L (usually negative)
+
+                        # Include realized P&L from closed/moved positions for this expiry
+                        # expiry_key format: "2026-02-10", history format: "10-Feb-2026"
+                        try:
+                            expiry_date = datetime.strptime(expiry_key, "%Y-%m-%d")
+                            history_expiry_key = expiry_date.strftime("%d-%b-%Y")
+                        except:
+                            history_expiry_key = expiry_key
+
+                        expiry_history = history_by_expiry.get(history_expiry_key, {})
+                        realized_pnl = expiry_history.get('booked', 0) + expiry_history.get('partial_booked', 0)
+
+                        # Total P&L = realized (closed) + unrealized (open)
+                        total_pnl = realized_pnl + unrealized_pnl
 
                         if net_credit > 0:
                             # Profit target based on NET credit (accounts for wing cost)
                             exit_pct = float(os.getenv("EXIT_TARGET_PCT", "0.50"))
                             profit_target = net_credit * exit_pct
 
-                            if current_pnl >= profit_target:
-                                print(f"[Auto-Trade] Expiry {expiry_key}: {int(exit_pct * 100)}% target reached! Net P&L: {current_pnl:.2f}, Target: {profit_target:.2f} (Max: {net_credit:.2f})")
+                            if total_pnl >= profit_target:
+                                print(f"[Auto-Trade] Expiry {expiry_key}: {int(exit_pct * 100)}% target reached!")
+                                print(f"[Auto-Trade]   Realized: ₹{realized_pnl:,.0f}, Unrealized: ₹{unrealized_pnl:,.0f}, Total: ₹{total_pnl:,.0f}")
+                                print(f"[Auto-Trade]   Target: ₹{profit_target:,.0f} ({int(exit_pct * 100)}% of ₹{net_credit:,.0f} max)")
 
                                 orders_placed = []
                                 paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
