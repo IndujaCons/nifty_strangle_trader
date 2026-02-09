@@ -444,7 +444,7 @@ def get_config():
         "api_key": os.getenv("KITE_API_KEY", ""),
         "paper_trading": os.getenv("PAPER_TRADING", "true").lower() == "true",
         "auto_trade": os.getenv("AUTO_TRADE", "false").lower() == "true",
-        "auto_exit": os.getenv("AUTO_EXIT", "true").lower() == "true",
+        "auto_exit": os.getenv("AUTO_EXIT", "false").lower() == "true",  # Default false for safety
         "auto_move": os.getenv("AUTO_MOVE", "false").lower() == "true",
         "buy_wings": os.getenv("BUY_WINGS", "false").lower() == "true",
         "wing_delta": int(float(os.getenv("WING_DELTA", "0.02")) * 100),  # As percentage (2 = 0.02)

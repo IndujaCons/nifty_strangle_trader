@@ -978,6 +978,35 @@
             color: #6b3d3d;
         }
 
+        /* Auto-Exit Active Banner */
+        .auto-exit-banner {
+            display: none;
+            background: linear-gradient(135deg, #ff6b35, #f7931e);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-align: center;
+            animation: pulse-glow 2s infinite;
+            box-shadow: 0 2px 8px rgba(255, 107, 53, 0.4);
+        }
+        .auto-exit-banner.show {
+            display: block;
+        }
+        .auto-exit-banner .exit-icon {
+            margin-right: 6px;
+        }
+        .auto-exit-banner .exit-target {
+            font-weight: 400;
+            opacity: 0.9;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 2px 8px rgba(255, 107, 53, 0.4); }
+            50% { box-shadow: 0 2px 16px rgba(255, 107, 53, 0.7); }
+        }
+
         /* Toast notification */
         .toast {
             position: fixed;
@@ -1085,6 +1114,12 @@
         <div class="panel">
             <div class="panel-header">Login & Settings</div>
             <div class="panel-content">
+                <!-- Auto-Exit Active Warning Banner -->
+                <div id="autoExitBanner" class="auto-exit-banner">
+                    <span class="exit-icon">⚡</span>AUTO-EXIT ACTIVE
+                    <span class="exit-target">@ <span id="exitTargetDisplay">50</span>% target</span>
+                </div>
+
                 <div class="login-section">
                     <h3>Zerodha Connection</h3>
 
@@ -1863,13 +1898,24 @@
                 });
         }
 
+        function updateAutoExitBanner(isActive, targetPct) {
+            const banner = document.getElementById('autoExitBanner');
+            const targetDisplay = document.getElementById('exitTargetDisplay');
+            if (isActive) {
+                banner.classList.add('show');
+                targetDisplay.textContent = targetPct || 50;
+            } else {
+                banner.classList.remove('show');
+            }
+        }
+
         function loadSettings() {
             fetch('/api/config')
                 .then(res => res.json())
                 .then(data => {
                     document.getElementById('liveTrading').checked = !data.paper_trading;
                     document.getElementById('autoTrade').checked = data.auto_trade || false;
-                    document.getElementById('autoExit').checked = data.auto_exit !== false;  // default true
+                    document.getElementById('autoExit').checked = data.auto_exit === true;  // default false (safer)
                     document.getElementById('autoMove').checked = data.auto_move || false;
                     document.getElementById('buyWings').checked = data.buy_wings || false;
                     document.getElementById('wingDelta').value = data.wing_delta || 2;
@@ -1882,6 +1928,8 @@
                     document.getElementById('targetDelta').value = data.target_delta || 7;
                     document.getElementById('deltaLabel').textContent = data.target_delta || 7;
                     document.getElementById('decayThreshold').value = data.decay_threshold || 60;
+                    // Update Auto-Exit banner visibility
+                    updateAutoExitBanner(data.auto_exit === true, data.exit_target_pct || 50);
                 });
         }
 
@@ -1903,6 +1951,9 @@
             document.getElementById('totalQty').textContent = lotQuantity * lotSize;
             document.getElementById('lotsDisplay').textContent = lotQuantity;
             document.getElementById('deltaLabel').textContent = targetDelta;
+
+            // Update Auto-Exit banner immediately when settings change
+            updateAutoExitBanner(autoExit, exitTargetPct);
 
             // Save settings first, then refresh market data immediately
             fetch('/api/settings', {
