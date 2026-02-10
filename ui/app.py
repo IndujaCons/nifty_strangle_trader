@@ -1714,6 +1714,8 @@ def history():
             try:
                 # Build margin params from positions for this expiry
                 margin_params = []
+                open_pos_symbols = [p['tradingsymbol'] for p in nifty_positions if p['quantity'] != 0]
+                print(f"expiry_key={expiry_key}, open_pos_symbols={open_pos_symbols}", flush=True, file=sys.stderr)
                 for pos in nifty_positions:
                     if expiry_key in pos['tradingsymbol'] and pos['quantity'] != 0:
                         margin_params.append({
@@ -1728,7 +1730,7 @@ def history():
                 if margin_params:
                     margin_response = provider.kite.basket_margins(margin_params)
                     data['margin_used'] = margin_response.get('final', {}).get('total', 0)
-                    print(f"Margin for {expiry_key}: ₹{data['margin_used']:,.0f} ({len(margin_params)} legs)")
+                    print(f"Margin for {expiry_key}: ₹{data['margin_used']:,.0f} ({len(margin_params)} legs)", flush=True, file=sys.stderr)
                 else:
                     print(f"No margin params for {expiry_key} - positions: {[p['tradingsymbol'] for p in nifty_positions if p['quantity'] != 0]}")
             except Exception as e:
