@@ -1728,8 +1728,24 @@ def history():
                             "quantity": abs(pos['quantity'])
                         })
                 if margin_params:
-                    margin_response = provider.kite.basket_margins(margin_params)
-                    data['margin_used'] = margin_response.get('final', {}).get('total', 0)
+                    if hasattr(provider.kite, 'basket_margins'):
+                        margin_response = provider.kite.basket_margins(margin_params)
+                        data['margin_used'] = margin_response.get('final', {}).get('total', 0)
+                    else:
+                        # Fall back to direct API call for older kiteconnect
+                        import requests
+                        headers = {
+                            "Authorization": f"token {provider.api_key}:{provider.kite.access_token}",
+                            "Content-Type": "application/json"
+                        }
+                        response = requests.post(
+                            "https://api.kite.trade/margins/basket",
+                            json=margin_params,
+                            headers=headers
+                        )
+                        if response.status_code == 200:
+                            result = response.json()
+                            data['margin_used'] = result.get('data', {}).get('final', {}).get('total', 0)
                     print(f"Margin for {expiry_key}: ₹{data['margin_used']:,.0f} ({len(margin_params)} legs)", flush=True, file=sys.stderr)
                 else:
                     print(f"No margin params for {expiry_key}", flush=True, file=sys.stderr)
