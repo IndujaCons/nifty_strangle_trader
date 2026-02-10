@@ -1724,6 +1724,9 @@ def history():
                 if margin_params:
                     margin_response = provider.kite.basket_margins(margin_params)
                     data['margin_used'] = margin_response.get('final', {}).get('total', 0)
+                    print(f"Margin for {expiry_key}: ₹{data['margin_used']:,.0f} ({len(margin_params)} legs)")
+                else:
+                    print(f"No margin params for {expiry_key} - positions: {[p['tradingsymbol'] for p in nifty_positions if p['quantity'] != 0]}")
             except Exception as e:
                 print(f"Error calculating margin for {expiry_key}: {e}")
                 data['margin_used'] = 0
