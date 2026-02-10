@@ -2484,6 +2484,19 @@
                         </div>
                         ${targetRow}` : '';
 
+            // Margin and ROI rows (only show for open positions with margin > 0)
+            const marginUsed = exp.margin_used || 0;
+            const roiPct = marginUsed > 0 ? ((expiryTotal / marginUsed) * 100).toFixed(1) : null;
+            const marginRow = marginUsed > 0 ? `
+                        <div class="expiry-row">
+                            <span>Margin</span>
+                            <span>₹${marginUsed.toLocaleString('en-IN', {maximumFractionDigits: 0})}</span>
+                        </div>
+                        <div class="expiry-row">
+                            <span>ROI</span>
+                            <span class="${expiryTotal >= 0 ? 'positive' : 'negative'}">${expiryTotal >= 0 ? '+' : ''}${roiPct}%</span>
+                        </div>` : '';
+
             // Exit All button (only show if there are open positions, never for closed)
             const exitButton = (hasOpenPositions && !isClosed) ? `
                         <div class="expiry-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
@@ -2501,6 +2514,7 @@
                     </div>
                     <div class="expiry-details">
                         ${maxProfitRow}
+                        ${marginRow}
                         <div class="expiry-row manual-row">
                             <span>Manual</span>
                             <span style="display:flex; align-items:center; gap:2px;">

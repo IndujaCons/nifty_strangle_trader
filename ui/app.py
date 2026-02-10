@@ -1606,6 +1606,7 @@ def history():
 
     # First, try to get live data from Zerodha and sync to CSV
     live_expiry_data = {}
+    nifty_positions = []
     zerodha_connected = False
 
     if provider is None:
@@ -1703,6 +1704,30 @@ def history():
     except Exception as e:
         print(f"Error fetching live positions: {e}")
 
+    # Calculate margin for expiries with open positions
+    for expiry_key, data in live_expiry_data.items():
+        if data['open_positions'] > 0:
+            try:
+                # Build margin params from positions for this expiry
+                margin_params = []
+                for pos in nifty_positions:
+                    if expiry_key in pos['tradingsymbol'] and pos['quantity'] != 0:
+                        margin_params.append({
+                            "exchange": "NFO",
+                            "tradingsymbol": pos['tradingsymbol'],
+                            "transaction_type": "SELL" if pos['quantity'] < 0 else "BUY",
+                            "variety": "regular",
+                            "product": "NRML",
+                            "order_type": "MARKET",
+                            "quantity": abs(pos['quantity'])
+                        })
+                if margin_params:
+                    margin_response = provider.kite.basket_margins(margin_params)
+                    data['margin_used'] = margin_response.get('final', {}).get('total', 0)
+            except Exception as e:
+                print(f"Error calculating margin for {expiry_key}: {e}")
+                data['margin_used'] = 0
+
     # Get persisted history from CSV
     csv_history = history_manager.get_history_by_expiry()
 
@@ -1718,7 +1743,8 @@ def history():
             'open': 0,
             'open_positions': 0,
             'closed_positions': data['closed_positions'],
-            'max_profit': 0
+            'max_profit': 0,
+            'margin_used': 0
         }
 
     # Overlay live data (current open positions)
@@ -1730,6 +1756,7 @@ def history():
             merged_data[expiry_display]['open'] = data['open']
             merged_data[expiry_display]['open_positions'] = data['open_positions']
             merged_data[expiry_display]['max_profit'] = data['max_profit']
+            merged_data[expiry_display]['margin_used'] = data.get('margin_used', 0)
             # Live booked = realised from partial closes (from API)
             # CSV partial_booked = same data persisted — replace CSV partial with live value
             if data['booked'] != 0:
@@ -1776,7 +1803,8 @@ def history():
                 'current_pnl': current_pnl,
                 'profit_pct': round(profit_pct, 1),
                 'exit_triggered': exit_triggered,
-                'status': 'open' if data['open_positions'] > 0 else 'closed'
+                'status': 'open' if data['open_positions'] > 0 else 'closed',
+                'margin_used': data.get('margin_used', 0)
             })
 
     response = jsonify({
