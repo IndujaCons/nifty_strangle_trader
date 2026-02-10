@@ -1705,7 +1705,8 @@ def history():
         print(f"Error fetching live positions: {e}")
 
     # Debug: show what we have before margin calculation
-    print(f"live_expiry_data: {[(k, v.get('open_positions', 0)) for k, v in live_expiry_data.items()]}")
+    import sys
+    print(f"live_expiry_data: {[(k, v.get('open_positions', 0)) for k, v in live_expiry_data.items()]}", flush=True, file=sys.stderr)
 
     # Calculate margin for expiries with open positions
     for expiry_key, data in live_expiry_data.items():
