@@ -1264,12 +1264,14 @@
                                 <th style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #ddd;">Strike</th>
                                 <th style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #ddd;">PE OI</th>
                                 <th style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #ddd;">PE Chg</th>
+                                <th style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #ddd;">PE 15m</th>
                                 <th style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #ddd;">CE OI</th>
                                 <th style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #ddd;">CE Chg</th>
+                                <th style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #ddd;">CE 15m</th>
                             </tr>
                         </thead>
                         <tbody id="oiTableBody">
-                            <tr><td colspan="5" style="text-align: center; padding: 10px; color: #999;">Waiting for data...</td></tr>
+                            <tr><td colspan="7" style="text-align: center; padding: 10px; color: #999;">Waiting for data...</td></tr>
                         </tbody>
                     </table>
                     <div id="oiReason" style="margin-top: 8px; font-size: 0.7rem; color: #666; text-align: center; font-style: italic;">
@@ -1991,7 +1993,7 @@
                     reasonEl.textContent = analysis?.error || 'Waiting for 9:15 baseline...';
                 }
                 actionEl.textContent = '--';
-                tableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 10px; color: #999;">Waiting for data...</td></tr>';
+                tableBody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 10px; color: #999;">Waiting for data...</td></tr>';
                 return;
             }
 
@@ -2046,13 +2048,15 @@
                             <td style="padding: 4px 6px; text-align: center; border-bottom: 1px solid #eee;">${strikeLabel}</td>
                             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #eee;">${formatOI(strike.pe_oi)}</td>
                             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #eee;">${formatOIChange(strike.pe_chg, false)}</td>
+                            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #eee;">${formatOIChange(strike.pe_chg_15m || 0, false)}</td>
                             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #eee;">${formatOI(strike.ce_oi)}</td>
                             <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #eee;">${formatOIChange(strike.ce_chg, true)}</td>
+                            <td style="padding: 4px 6px; text-align: right; border-bottom: 1px solid #eee;">${formatOIChange(strike.ce_chg_15m || 0, true)}</td>
                         </tr>
                     `;
                 }
             }
-            tableBody.innerHTML = tableHTML || '<tr><td colspan="5" style="text-align: center; padding: 10px; color: #999;">No strike data</td></tr>';
+            tableBody.innerHTML = tableHTML || '<tr><td colspan="7" style="text-align: center; padding: 10px; color: #999;">No strike data</td></tr>';
 
             // Signal
             signalEl.textContent = analysis.signal;

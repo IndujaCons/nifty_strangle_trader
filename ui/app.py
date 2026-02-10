@@ -10,7 +10,8 @@ import os
 import time
 import threading
 import requests
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
+from collections import deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -65,6 +66,7 @@ class OITracker:
         self.baseline_date = None  # Track which date the baseline is for
         self.current_data = {}  # Latest data for each strike
         self.baseline_spot = None
+        self.oi_history = deque(maxlen=20)  # ~20 minutes of snapshots at 1-min intervals
 
     def set_baseline(self, strikes_data, spot_price=None):
         """Set 9:15 AM baseline - call once at market open."""
@@ -77,10 +79,42 @@ class OITracker:
     def update_current(self, strikes_data):
         """Update current OI data for all tracked strikes."""
         self.current_data = strikes_data.copy()
+        # Add snapshot to history for 15-min change tracking
+        self.oi_history.append({
+            'time': datetime.now(),
+            'data': strikes_data.copy()
+        })
 
     def has_baseline(self):
         """Check if we have a valid baseline for today."""
         return self.baseline_date == date.today() and len(self.baseline_snapshot) > 0
+
+    def get_15min_change(self, strike):
+        """Get OI change for a strike over last 15 minutes."""
+        if len(self.oi_history) < 2:
+            return {'ce_chg_15m': 0, 'pe_chg_15m': 0}
+
+        now = datetime.now()
+        target_time = now - timedelta(minutes=15)
+
+        # Find snapshot closest to 15 mins ago (but not newer)
+        old_snapshot = None
+        for snapshot in self.oi_history:
+            if snapshot['time'] <= target_time:
+                old_snapshot = snapshot
+            else:
+                break
+
+        if not old_snapshot or strike not in old_snapshot['data']:
+            return {'ce_chg_15m': 0, 'pe_chg_15m': 0}
+
+        current = self.current_data.get(strike, {})
+        old = old_snapshot['data'].get(strike, {})
+
+        return {
+            'ce_chg_15m': current.get('ce_oi', 0) - old.get('ce_oi', 0),
+            'pe_chg_15m': current.get('pe_oi', 0) - old.get('pe_oi', 0)
+        }
 
     def get_analysis(self, atm_strike):
         """Get 6-strike OI analysis vs 9:15 baseline."""
@@ -127,14 +161,19 @@ class OITracker:
             ce_pct = (ce_chg / baseline_ce * 100) if baseline_ce > 0 else 0
             pe_pct = (pe_chg / baseline_pe * 100) if baseline_pe > 0 else 0
 
+            # Get 15-minute change
+            chg_15m = self.get_15min_change(strike)
+
             strikes_analysis.append({
                 "strike": strike,
                 "ce_oi": current_ce,
                 "ce_chg": ce_chg,
                 "ce_pct": round(ce_pct, 1),
+                "ce_chg_15m": chg_15m['ce_chg_15m'],
                 "pe_oi": current_pe,
                 "pe_chg": pe_chg,
                 "pe_pct": round(pe_pct, 1),
+                "pe_chg_15m": chg_15m['pe_chg_15m'],
                 "is_atm": strike == atm_100
             })
 
