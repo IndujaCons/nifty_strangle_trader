@@ -1732,9 +1732,9 @@ def history():
                     data['margin_used'] = margin_response.get('final', {}).get('total', 0)
                     print(f"Margin for {expiry_key}: ₹{data['margin_used']:,.0f} ({len(margin_params)} legs)", flush=True, file=sys.stderr)
                 else:
-                    print(f"No margin params for {expiry_key} - positions: {[p['tradingsymbol'] for p in nifty_positions if p['quantity'] != 0]}")
+                    print(f"No margin params for {expiry_key}", flush=True, file=sys.stderr)
             except Exception as e:
-                print(f"Error calculating margin for {expiry_key}: {e}")
+                print(f"Error calculating margin for {expiry_key}: {e}", flush=True, file=sys.stderr)
                 data['margin_used'] = 0
 
     # Get persisted history from CSV
