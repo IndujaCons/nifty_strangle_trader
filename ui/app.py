@@ -1704,18 +1704,12 @@ def history():
     except Exception as e:
         print(f"Error fetching live positions: {e}")
 
-    # Debug: show what we have before margin calculation
-    import sys
-    print(f"live_expiry_data: {[(k, v.get('open_positions', 0)) for k, v in live_expiry_data.items()]}", flush=True, file=sys.stderr)
-
     # Calculate margin for expiries with open positions
     for expiry_key, data in live_expiry_data.items():
         if data['open_positions'] > 0:
             try:
                 # Build margin params from positions for this expiry
                 margin_params = []
-                open_pos_symbols = [p['tradingsymbol'] for p in nifty_positions if p['quantity'] != 0]
-                print(f"expiry_key={expiry_key}, open_pos_symbols={open_pos_symbols}", flush=True, file=sys.stderr)
                 for pos in nifty_positions:
                     if expiry_key in pos['tradingsymbol'] and pos['quantity'] != 0:
                         margin_params.append({
@@ -1746,11 +1740,8 @@ def history():
                         if response.status_code == 200:
                             result = response.json()
                             data['margin_used'] = result.get('data', {}).get('final', {}).get('total', 0)
-                    print(f"Margin for {expiry_key}: ₹{data['margin_used']:,.0f} ({len(margin_params)} legs)", flush=True, file=sys.stderr)
-                else:
-                    print(f"No margin params for {expiry_key}", flush=True, file=sys.stderr)
             except Exception as e:
-                print(f"Error calculating margin for {expiry_key}: {e}", flush=True, file=sys.stderr)
+                print(f"Error calculating margin for {expiry_key}: {e}")
                 data['margin_used'] = 0
 
     # Get persisted history from CSV
