@@ -1862,9 +1862,6 @@ def history():
             exit_target_pct = float(exit_target_raw) * 100
             exit_triggered = profit_pct >= exit_target_pct and data['open_positions'] > 0
 
-            # Debug logging to trace exit_triggered calculation
-            print(f"[DEBUG exit_triggered] expiry={data['expiry']} raw='{os.getenv('EXIT_TARGET_PCT')}' target={exit_target_pct}% profit={profit_pct:.1f}% open_pos={data['open_positions']} triggered={exit_triggered}")
-
             by_expiry.append({
                 'expiry': data['expiry'],
                 'booked': data['booked'],
