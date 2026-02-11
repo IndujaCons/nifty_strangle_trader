@@ -138,6 +138,37 @@ class SignalTracker:
 
         return None
 
+    def _in_signal_tracking_window(self, now: datetime) -> tuple[bool, Optional[str]]:
+        """
+        Check if we're in the extended signal tracking window (9:15 - 15:30).
+        This captures signals during pre-market and post-afternoon periods.
+
+        Returns:
+            (in_tracking_window, window_label)
+            window_label: 'pre_market', 'morning', 'afternoon', 'post_afternoon', or None
+        """
+        current_time = now.time()
+
+        tracking_start = self._parse_time("09:15")
+        tracking_end = self._parse_time("15:30")
+
+        if not (tracking_start <= current_time <= tracking_end):
+            return False, None
+
+        # Determine which period we're in
+        pre_market_end = self._parse_time("09:30")
+        morning_end = self._parse_time(TRADING_WINDOWS["morning_window"]["end"])
+        afternoon_end = self._parse_time(TRADING_WINDOWS["afternoon_window"]["end"])
+
+        if current_time < pre_market_end:
+            return True, "pre_market"
+        elif current_time < morning_end:
+            return True, "morning"
+        elif current_time < afternoon_end:
+            return True, "afternoon"
+        else:
+            return True, "post_afternoon"
+
     def _can_trade_in_window(self, window: str) -> bool:
         """Check if we can still trade in the given window."""
         if window == "morning":
@@ -170,24 +201,27 @@ class SignalTracker:
             _save_trade_counts(0, 0)
             logger.info("New trading day - trade counts reset")
 
-        # Check trading window
+        # Check trading window (for actual trades)
         current_window = self._get_current_window(now)
         can_trade = current_window is not None and self._can_trade_in_window(current_window)
 
-        # Only track signal inside trading windows (9:30 - 15:15)
+        # Check extended signal tracking window (9:15 - 15:30)
+        in_tracking_window, tracking_label = self._in_signal_tracking_window(now)
         required_duration = STRATEGY_CONFIG["signal_duration_seconds"]
-        if current_window is None:
+
+        # Outside signal tracking window - reset and return
+        if not in_tracking_window:
             if self.signal_state.is_active:
                 # Log window_closed event to history
                 duration = (now - self.signal_state.signal_start).total_seconds() if self.signal_state.signal_start else 0
                 self._signal_history.signal_ended("window_closed", duration, required_duration)
-                logger.info("Signal reset: outside trading window")
+                logger.info("Signal reset: outside signal tracking window")
             self.signal_state.reset()
             return {
                 "signal_active": False,
                 "duration_seconds": 0,
                 "required_seconds": required_duration,
-                "current_window": None,
+                "current_window": tracking_label,
                 "can_trade": False,
                 "entry_ready": False,
                 "morning_trades": self.window_state.morning_trades,
@@ -233,7 +267,7 @@ class SignalTracker:
             "signal_active": self.signal_state.is_active,
             "duration_seconds": duration_seconds,
             "required_seconds": required_duration,
-            "current_window": current_window,
+            "current_window": tracking_label,  # Show extended window label (pre_market, post_afternoon, etc.)
             "can_trade": can_trade,
             "entry_ready": entry_ready,
             "morning_trades": self.window_state.morning_trades,
