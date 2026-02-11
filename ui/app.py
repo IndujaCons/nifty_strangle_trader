@@ -1744,9 +1744,11 @@ def history():
                     else:  # Bought position: subtract premium paid
                         live_expiry_data[expiry_key]['max_profit'] -= avg_price * quantity
                 else:
-                    # Closed position - sync to CSV on the fly (dedup handled by add_trade)
-                    # Don't add to live_expiry_data to avoid double-counting with CSV
-                    history_manager.update_from_positions([pos])
+                    # Closed position - sync to CSV for persistence
+                    # Debug: log closed position detection
+                    print(f"[History Sync] Closed position: {symbol}, pnl={pnl}")
+                    added = history_manager.update_from_positions([pos])
+                    print(f"[History Sync] CSV update result: {added} entries added")
 
     except Exception as e:
         print(f"Error fetching live positions: {e}")
