@@ -930,12 +930,8 @@ def market_data():
                                 unrealized_pnl += (ltp - avg_price) * qty  # P&L (usually negative)
 
                         # Include realized P&L from closed/moved positions for this expiry
-                        # expiry_key format: "2026-02-10", history format: "10-Feb-2026"
-                        try:
-                            expiry_date = datetime.strptime(expiry_key, "%Y-%m-%d")
-                            history_expiry_key = expiry_date.strftime("%d-%b-%Y")
-                        except:
-                            history_expiry_key = expiry_key
+                        # expiry_key format: "26217" or "26FEB17", history format: "17-02-2026"
+                        history_expiry_key = format_expiry_key(expiry_key)
 
                         expiry_history = history_by_expiry.get(history_expiry_key, {})
                         realized_pnl = expiry_history.get('booked', 0) + expiry_history.get('partial_booked', 0)
