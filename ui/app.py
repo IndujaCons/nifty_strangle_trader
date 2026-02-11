@@ -941,8 +941,12 @@ def market_data():
 
                         if net_credit > 0:
                             # Profit target based on NET credit (accounts for wing cost)
-                            exit_pct = float(os.getenv("EXIT_TARGET_PCT", "0.50"))
+                            exit_pct = float(os.getenv("EXIT_TARGET_PCT", "0.50").strip("'\""))
                             profit_target = net_credit * exit_pct
+                            pct_achieved = (total_pnl / net_credit * 100) if net_credit > 0 else 0
+
+                            # Debug: show progress toward exit target
+                            print(f"[Auto-Trade] {history_expiry_key}: {pct_achieved:.1f}% of {int(exit_pct*100)}% target (₹{total_pnl:,.0f}/₹{profit_target:,.0f})")
 
                             if total_pnl >= profit_target:
                                 print(f"[Auto-Trade] Expiry {expiry_key}: {int(exit_pct * 100)}% target reached!")
