@@ -49,11 +49,14 @@ class TradeHistoryManager:
     def add_trade(self, trade_data: Dict) -> bool:
         """Add a new trade entry."""
         try:
-            # Double-check symbol doesn't already exist (prevent race conditions)
+            # Check if same symbol+date already exists (prevent duplicates for same day)
             symbol = trade_data.get('symbol', '')
-            closed, partial = self._load_existing_symbols()
-            if symbol and symbol in (closed | partial):
-                return False
+            trade_date = trade_data.get('date', datetime.now().strftime('%Y-%m-%d'))
+
+            # Allow multiple entries per symbol on different dates
+            existing_date = self._get_symbol_date(symbol) if symbol else None
+            if existing_date == trade_date:
+                return False  # Same symbol + same date = duplicate, skip
 
             with open(self.csv_path, 'a', newline='') as f:
                 writer = csv.writer(f)
