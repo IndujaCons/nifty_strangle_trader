@@ -1298,6 +1298,25 @@
                         <span>Window: <span id="tradingWindow">--</span></span>
                         <span style="margin-left: 20px;">Trades: M:<span id="morningTrades">0</span> A:<span id="afternoonTrades">0</span></span>
                     </div>
+
+                    <!-- Signal History (collapsible) -->
+                    <div style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleSignalHistory()">
+                            <span style="font-size: 0.7rem; color: #888; text-transform: uppercase;">Signal History</span>
+                            <span id="signalHistoryToggle" style="font-size: 0.8rem; color: #888;">+</span>
+                        </div>
+                        <div id="signalHistoryContent" style="display: none; margin-top: 8px;">
+                            <!-- Today's signals timeline -->
+                            <div id="todaySignals" style="font-size: 0.7rem; color: #666; margin-bottom: 8px;">
+                                <div style="font-weight: 500; margin-bottom: 4px;">Today: <span id="todaySignalCount">0</span> signals</div>
+                                <div id="todaySignalList" style="max-height: 80px; overflow-y: auto;"></div>
+                            </div>
+                            <!-- 5-day summary -->
+                            <div id="signalDailyStats" style="font-size: 0.65rem; color: #888;">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="strangle-details">
@@ -1583,6 +1602,65 @@
 
         // Selected expiry for market monitor
         let selectedExpiry = null;
+
+        // Signal history state
+        let signalHistoryExpanded = false;
+
+        function toggleSignalHistory() {
+            signalHistoryExpanded = !signalHistoryExpanded;
+            const content = document.getElementById('signalHistoryContent');
+            const toggle = document.getElementById('signalHistoryToggle');
+            content.style.display = signalHistoryExpanded ? 'block' : 'none';
+            toggle.textContent = signalHistoryExpanded ? '-' : '+';
+            if (signalHistoryExpanded) {
+                refreshSignalHistory();
+            }
+        }
+
+        function refreshSignalHistory() {
+            fetch('/api/signal-stats')
+                .then(res => res.json())
+                .then(data => {
+                    // Update today's signals
+                    const todaySignals = data.today || [];
+                    document.getElementById('todaySignalCount').textContent = todaySignals.length;
+
+                    const listEl = document.getElementById('todaySignalList');
+                    if (todaySignals.length === 0) {
+                        listEl.innerHTML = '<div style="color: #aaa; font-style: italic;">No signals yet</div>';
+                    } else {
+                        listEl.innerHTML = todaySignals.map(s => {
+                            const startTime = s.start.substring(0, 5);  // HH:MM
+                            const endTime = s.end.substring(0, 5);
+                            const mins = Math.floor(s.duration / 60);
+                            const secs = s.duration % 60;
+                            const durationStr = `${mins}m ${secs}s`;
+                            const isReady = s.reached_threshold;
+                            const reasonLabel = s.reason === 'entry_ready' || s.reason === 'trade_executed'
+                                ? (s.reason === 'trade_executed' ? 'TRADED' : 'ENTRY READY')
+                                : s.reason.toUpperCase();
+                            const color = isReady ? '#4a7c4a' : '#888';
+                            return `<div style="color: ${color}; margin: 2px 0;">${startTime} - ${endTime} (${durationStr}) ${reasonLabel}</div>`;
+                        }).join('');
+                    }
+
+                    // Update 5-day summary
+                    const dailyStats = data.daily_stats || [];
+                    const statsEl = document.getElementById('signalDailyStats');
+                    if (dailyStats.length === 0) {
+                        statsEl.innerHTML = '<div style="color: #aaa;">No history</div>';
+                    } else {
+                        statsEl.innerHTML = dailyStats.map(d => {
+                            const dateObj = new Date(d.date);
+                            const dateStr = dateObj.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+                            const avgMins = Math.floor(d.avg_duration / 60);
+                            const avgSecs = d.avg_duration % 60;
+                            return `<div>${dateStr}: ${d.signals} signals, avg ${avgMins}m ${avgSecs}s, ${d.reached_threshold} reached threshold</div>`;
+                        }).join('');
+                    }
+                })
+                .catch(err => console.error('Error loading signal history:', err));
+        }
 
         function loadExpiries() {
             fetch('/api/expiries')
@@ -2090,6 +2168,10 @@
             positionInterval = setInterval(refreshPositions, 60000);    // 1 minute
             historyInterval = setInterval(refreshHistory, 60000);       // 1 minute
             setInterval(checkConnection, 60000);                        // 1 minute - refresh available margin
+            // Refresh signal history every minute if expanded
+            setInterval(() => {
+                if (signalHistoryExpanded) refreshSignalHistory();
+            }, 60000);
         }
 
         function refreshMarketData() {

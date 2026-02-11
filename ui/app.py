@@ -1396,6 +1396,14 @@ def pcr_history():
     return jsonify({"history": history})
 
 
+@app.route("/api/signal-stats")
+def signal_stats():
+    """Get signal timing statistics."""
+    from data.signal_history import get_signal_history_manager
+    signal_history = get_signal_history_manager()
+    return jsonify(signal_history.get_summary())
+
+
 @app.route("/api/positions")
 def positions():
     """Get current positions."""
@@ -1831,9 +1839,19 @@ def history():
     manual_profits = history_manager.get_manual_profits()
     total_manual = sum(manual_profits.values())
 
-    # Format response - sort by expiry descending
+    # Format response - sort by expiry descending (parse DD-MM-YYYY for proper date sorting)
+    def parse_expiry_date(expiry_str):
+        """Parse DD-MM-YYYY to sortable tuple (year, month, day)."""
+        try:
+            parts = expiry_str.split('-')
+            if len(parts) == 3:
+                return (int(parts[2]), int(parts[1]), int(parts[0]))  # (YYYY, MM, DD)
+        except:
+            pass
+        return (0, 0, 0)  # Fallback for unparseable dates
+
     by_expiry = []
-    for expiry, data in sorted(merged_data.items(), key=lambda x: x[0], reverse=True):
+    for expiry, data in sorted(merged_data.items(), key=lambda x: parse_expiry_date(x[0]), reverse=True):
         # Only include if there's any P&L or max_profit
         if data['booked'] != 0 or data['open'] != 0 or data['max_profit'] != 0:
             manual_val = manual_profits.get(data['expiry'], 0)

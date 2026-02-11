@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from loguru import logger
 
 from config.settings import TRADING_WINDOWS, STRATEGY_CONFIG
+from data.signal_history import get_signal_history_manager
 
 # File path for persisting trade counts
 TRADE_COUNT_FILE = Path(__file__).parent.parent / "data_store" / "daily_trades.json"
@@ -91,6 +92,7 @@ class SignalTracker:
         self.signal_state = SignalState()
         self.window_state = TradingWindowState()
         self._last_check_date: Optional[datetime] = None
+        self._signal_history = get_signal_history_manager()
         # Load persisted trade counts for today
         self._load_persisted_counts()
 
@@ -173,14 +175,18 @@ class SignalTracker:
         can_trade = current_window is not None and self._can_trade_in_window(current_window)
 
         # Only track signal inside trading windows (9:30 - 15:15)
+        required_duration = STRATEGY_CONFIG["signal_duration_seconds"]
         if current_window is None:
             if self.signal_state.is_active:
+                # Log window_closed event to history
+                duration = (now - self.signal_state.signal_start).total_seconds() if self.signal_state.signal_start else 0
+                self._signal_history.signal_ended("window_closed", duration, required_duration)
                 logger.info("Signal reset: outside trading window")
             self.signal_state.reset()
             return {
                 "signal_active": False,
                 "duration_seconds": 0,
-                "required_seconds": STRATEGY_CONFIG["signal_duration_seconds"],
+                "required_seconds": required_duration,
                 "current_window": None,
                 "can_trade": False,
                 "entry_ready": False,
@@ -198,10 +204,14 @@ class SignalTracker:
                 # Signal just started
                 self.signal_state.signal_start = now
                 self.signal_state.is_active = True
+                self._signal_history.signal_started()
                 logger.info(f"Signal started: Straddle {straddle_price:.2f} > VWAP {vwap:.2f}")
         else:
             # Signal broken, reset
             if self.signal_state.is_active:
+                # Log broke event to history
+                duration = (now - self.signal_state.signal_start).total_seconds() if self.signal_state.signal_start else 0
+                self._signal_history.signal_ended("broke", duration, required_duration)
                 logger.info(f"Signal broken: Straddle {straddle_price:.2f} <= VWAP {vwap:.2f}")
             self.signal_state.reset()
 
@@ -209,9 +219,10 @@ class SignalTracker:
         duration_seconds = 0
         if self.signal_state.is_active and self.signal_state.signal_start:
             duration_seconds = (now - self.signal_state.signal_start).total_seconds()
+            # Track duration for partial signals
+            self._signal_history.update_duration(duration_seconds)
 
         # Check if entry conditions fully met
-        required_duration = STRATEGY_CONFIG["signal_duration_seconds"]
         entry_ready = (
             self.signal_state.is_active and
             duration_seconds >= required_duration and
@@ -233,11 +244,18 @@ class SignalTracker:
 
     def record_trade(self, window: str):
         """Record that a trade was executed in the given window."""
+        # Log trade_executed event to history
+        now = datetime.now()
+        if self.signal_state.is_active and self.signal_state.signal_start:
+            duration = (now - self.signal_state.signal_start).total_seconds()
+            required_duration = STRATEGY_CONFIG["signal_duration_seconds"]
+            self._signal_history.signal_ended("trade_executed", duration, required_duration)
+
         if window == "morning":
             self.window_state.morning_trades += 1
         elif window == "afternoon":
             self.window_state.afternoon_trades += 1
-        self.window_state.last_trade_time = datetime.now()
+        self.window_state.last_trade_time = now
         self.signal_state.reset()
         # Persist trade counts to file
         _save_trade_counts(
