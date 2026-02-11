@@ -1857,8 +1857,9 @@ def history():
             current_pnl = data['booked'] + data['open'] + manual_val
             # Profit percentage
             profit_pct = (current_pnl / total_max_profit_expiry * 100) if total_max_profit_expiry > 0 else 0
-            # Trigger at user's exit target percentage
-            exit_target_pct = float(os.getenv("EXIT_TARGET_PCT", "0.50")) * 100
+            # Trigger at user's exit target percentage (strip quotes in case .env has them)
+            exit_target_raw = os.getenv("EXIT_TARGET_PCT", "0.50").strip("'\"")
+            exit_target_pct = float(exit_target_raw) * 100
             exit_triggered = profit_pct >= exit_target_pct and data['open_positions'] > 0
 
             by_expiry.append({
