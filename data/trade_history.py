@@ -103,9 +103,15 @@ class TradeHistoryManager:
             if quantity != 0:
                 continue  # Still open, no realised profit
 
-            # Skip if already recorded as closed
+            # Skip if already recorded as closed TODAY (same date = same trade)
+            # Allow multiple entries for same symbol on different dates (different trades)
+            today = datetime.now().strftime('%Y-%m-%d')
             if symbol in closed_symbols:
-                continue
+                # Check if existing entry is from today
+                existing_date = self._get_symbol_date(symbol)
+                if existing_date == today:
+                    continue  # Same day, same trade - skip
+                # Different day = new trade, allow it (symbol will have multiple entries)
 
             # Remove any prior partial entry before adding as closed
             if symbol in partial_symbols:
@@ -290,6 +296,19 @@ class TradeHistoryManager:
         except Exception:
             pass
         return closed, partial
+
+    def _get_symbol_date(self, symbol: str) -> Optional[str]:
+        """Get the date of the most recent entry for a symbol."""
+        try:
+            with open(self.csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                latest_date = None
+                for row in reader:
+                    if row.get('symbol') == symbol:
+                        latest_date = row.get('date')
+                return latest_date
+        except Exception:
+            return None
 
     def get_history_by_expiry(self) -> Dict:
         """
