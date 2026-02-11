@@ -2220,10 +2220,12 @@
                     document.getElementById('straddleVwap').textContent = data.straddle_vwap?.toFixed(2) || '--';
 
                     const diffEl = document.getElementById('vwapDiff');
-                    if (data.vwap_diff !== undefined) {
+                    if (data.vwap_diff !== undefined && data.vwap_diff !== null) {
                         const sign = data.vwap_diff >= 0 ? '+' : '';
                         diffEl.textContent = sign + data.vwap_diff.toFixed(2);
                         diffEl.className = 'value ' + (data.vwap_diff >= 0 ? 'positive' : 'negative');
+                    } else {
+                        diffEl.textContent = '--';
                     }
 
                     // PCR
