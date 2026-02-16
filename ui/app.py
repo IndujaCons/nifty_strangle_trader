@@ -7,6 +7,7 @@ Open: http://localhost:5000
 """
 import sys
 import os
+import re
 import time
 import threading
 import requests
@@ -24,6 +25,28 @@ from data.trade_history import get_history_manager
 from data.pcr_history import get_pcr_manager
 from core.signal_tracker import SignalTracker
 from config.settings import NIFTY_CONFIG, MARKET_CONFIG, STRATEGY_CONFIG
+
+
+def parse_nifty_symbol(symbol):
+    """Parse NIFTY option symbol -> (expiry_code, strike, option_type) or None.
+
+    Key: try weekly-with-day FIRST, but require 5+ digit strike after it.
+    This prevents monthly NIFTY26FEB26500CE from matching as weekly 26FEB26 + 500.
+    """
+    # Weekly with month name: NIFTY26FEB1726500CE -> ('26FEB17', 26500, 'CE')
+    match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d{5,})(CE|PE)', symbol)
+    if match:
+        return match.group(1), int(match.group(2)), match.group(3)
+    # Monthly: NIFTY26FEB26500CE -> ('26FEB', 26500, 'CE')
+    match = re.match(r'NIFTY(\d{2}[A-Z]{3})(\d{5,})(CE|PE)', symbol)
+    if match:
+        return match.group(1), int(match.group(2)), match.group(3)
+    # Compact weekly: NIFTY2621726500CE -> ('26217', 26500, 'CE')
+    match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
+    if match:
+        return match.group(1), int(match.group(2)), match.group(3)
+    return None
+
 
 app = Flask(__name__)
 
@@ -656,18 +679,32 @@ def get_expiries():
             net_positions = positions.get('net', [])
             for pos in net_positions:
                 if pos['tradingsymbol'].startswith('NIFTY') and pos['quantity'] != 0:
-                    # Extract expiry from symbol like NIFTY26113 or NIFTY26JAN
                     symbol = pos['tradingsymbol']
-                    match = re.match(r'NIFTY(\d{2})(\d|[A-Z])(\d{2})', symbol)
-                    if match:
-                        yy, m, dd = match.groups()
-                        year = 2000 + int(yy)
-                        # Month mapping
-                        month_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
-                                    '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
-                        month = month_map.get(m, int(m) if m.isdigit() else 1)
+                    parsed = parse_nifty_symbol(symbol)
+                    if parsed:
+                        expiry_code = parsed[0]
+                        month_name_map = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                                         'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
+                        month_char_map = {'1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6,
+                                         '7': 7, '8': 8, '9': 9, 'O': 10, 'N': 11, 'D': 12}
                         try:
-                            exp_date = date(year, month, int(dd))
+                            import calendar
+                            if len(expiry_code) == 7 and expiry_code[2:5].isalpha():
+                                yy = int(expiry_code[:2])
+                                mm = month_name_map.get(expiry_code[2:5].upper(), 1)
+                                dd = int(expiry_code[5:7])
+                                exp_date = date(2000 + yy, mm, dd)
+                            elif len(expiry_code) == 5 and expiry_code[2:5].isalpha():
+                                yy = int(expiry_code[:2])
+                                mm = month_name_map.get(expiry_code[2:5].upper(), 1)
+                                last_day = calendar.monthrange(2000 + yy, mm)[1]
+                                exp_date = date(2000 + yy, mm, last_day)
+                            else:
+                                yy = int(expiry_code[:2])
+                                m_char = expiry_code[2]
+                                dd = int(expiry_code[3:5])
+                                mm = month_char_map.get(m_char, 1)
+                                exp_date = date(2000 + yy, mm, dd)
                             if exp_date not in position_expiries:
                                 position_expiries.append(exp_date)
                         except:
@@ -837,7 +874,7 @@ def market_data():
                         auto_trade_state["last_entry_window"] = current_window
                         auto_trade_state["last_entry_expiry"] = str(data.expiry)
                         auto_trade_state["entry_premium"] = total_premium
-                        print(f"[Auto-Trade] Entry executed: {data.call_strike}CE/{data.put_strike}PE, Premium: {total_premium:.2f}")
+                        print(f"[Auto-Trade] Entry executed: {data.call_strike}CE/{data.put_strike}PE, Premium: {total_premium:.2f}", flush=True)
 
                         # Buy protective wings if enabled (creates iron condor)
                         if config.get("buy_wings"):
@@ -852,17 +889,17 @@ def market_data():
                                         quantity=config["lot_quantity"],
                                     )
                                     if wing_result.get("success"):
-                                        print(f"[Auto-Trade] Wings bought: {wing_data.call_strike}CE/{wing_data.put_strike}PE @ {wing_delta*100:.0f}δ")
+                                        print(f"[Auto-Trade] Wings bought: {wing_data.call_strike}CE/{wing_data.put_strike}PE @ {wing_delta*100:.0f}δ", flush=True)
                                     else:
-                                        print(f"[Auto-Trade] Wing order failed: {wing_result.get('error')}")
+                                        print(f"[Auto-Trade] Wing order failed: {wing_result.get('error')}", flush=True)
                                 else:
-                                    print(f"[Auto-Trade] Could not find {wing_delta*100:.0f}δ strikes for wings")
+                                    print(f"[Auto-Trade] Could not find {wing_delta*100:.0f}δ strikes for wings", flush=True)
                             except Exception as wing_e:
-                                print(f"[Auto-Trade] Wing error: {wing_e}")
+                                print(f"[Auto-Trade] Wing error: {wing_e}", flush=True)
                     else:
-                        print(f"[Auto-Trade] Entry failed: {result.get('error', 'Unknown error')}")
+                        print(f"[Auto-Trade] Entry failed: {result.get('error', 'Unknown error')}", flush=True)
                 except Exception as e:
-                    print(f"[Auto-Trade] Entry error: {e}")
+                    print(f"[Auto-Trade] Entry error: {e}", flush=True)
 
         # Auto-exit: Exit positions when profit target is reached (PER EXPIRY)
         # Works for ALL trades (manual or auto) based on actual position data
@@ -886,10 +923,10 @@ def market_data():
 
                     for pos in nifty_positions:
                         symbol = pos['tradingsymbol']
-                        # Extract expiry pattern from symbol (e.g., "25120" or "25JAN")
-                        match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2}|\d{2}[A-Z0-9]\d{2}|\d{2}[A-Z]{3})', symbol)
-                        if match:
-                            expiry_key = match.group(1)
+                        # Extract expiry pattern from symbol
+                        parsed = parse_nifty_symbol(symbol)
+                        if parsed:
+                            expiry_key = parsed[0]
                             if expiry_key not in expiry_groups:
                                 expiry_groups[expiry_key] = []
                             expiry_groups[expiry_key].append(pos)
@@ -946,12 +983,12 @@ def market_data():
                             pct_achieved = (total_pnl / net_credit * 100) if net_credit > 0 else 0
 
                             # Debug: show progress toward exit target
-                            print(f"[Auto-Trade] {history_expiry_key}: {pct_achieved:.1f}% of {int(exit_pct*100)}% target (₹{total_pnl:,.0f}/₹{profit_target:,.0f})")
+                            print(f"[Auto-Trade] {history_expiry_key}: {pct_achieved:.1f}% of {int(exit_pct*100)}% target (₹{total_pnl:,.0f}/₹{profit_target:,.0f})", flush=True)
 
                             if total_pnl >= profit_target:
-                                print(f"[Auto-Trade] Expiry {expiry_key}: {int(exit_pct * 100)}% target reached!")
-                                print(f"[Auto-Trade]   Realized: ₹{realized_pnl:,.0f}, Unrealized: ₹{unrealized_pnl:,.0f}, Total: ₹{total_pnl:,.0f}")
-                                print(f"[Auto-Trade]   Target: ₹{profit_target:,.0f} ({int(exit_pct * 100)}% of ₹{net_credit:,.0f} max)")
+                                print(f"[Auto-Trade] Expiry {expiry_key}: {int(exit_pct * 100)}% target reached!", flush=True)
+                                print(f"[Auto-Trade]   Realized: ₹{realized_pnl:,.0f}, Unrealized: ₹{unrealized_pnl:,.0f}, Total: ₹{total_pnl:,.0f}", flush=True)
+                                print(f"[Auto-Trade]   Target: ₹{profit_target:,.0f} ({int(exit_pct * 100)}% of ₹{net_credit:,.0f} max)", flush=True)
 
                                 orders_placed = []
                                 paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
@@ -985,10 +1022,10 @@ def market_data():
                                     exited_expiries.add(expiry_key)
                                     auto_trade_state["last_exit_date"] = today
                                     auto_trade_state["exited_expiries_today"] = exited_expiries
-                                    print(f"[Auto-Trade] Expiry {expiry_key}: Exit complete, {len(orders_placed)} orders placed")
+                                    print(f"[Auto-Trade] Expiry {expiry_key}: Exit complete, {len(orders_placed)} orders placed", flush=True)
 
             except Exception as e:
-                print(f"[Auto-Trade] Exit check error: {e}")
+                print(f"[Auto-Trade] Exit check error: {e}", flush=True)
 
         # Auto-move: Move decayed positions to target delta strike
         # Timing: 9:30 AM to 3:15 PM only (same as trading windows)
@@ -1034,17 +1071,11 @@ def market_data():
                             continue
 
                         # Parse symbol to get strike, expiry, option type
-                        match = re.match(r'NIFTY(\d{2}[A-Z]{3})(\d{5,})(CE|PE)', symbol)
-                        if not match:
-                            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d{5,})(CE|PE)', symbol)
-                        if not match:
-                            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
-                        if not match:
+                        parsed = parse_nifty_symbol(symbol)
+                        if not parsed:
                             continue
 
-                        expiry_code = match.group(1)
-                        strike = int(match.group(2))
-                        option_type = match.group(3)
+                        expiry_code, strike, option_type = parsed
 
                         # Parse expiry date
                         import calendar
@@ -1104,7 +1135,7 @@ def market_data():
                             profit_pct = 0
 
                         if profit_pct >= decay_threshold:
-                            print(f"[Auto-Move] {symbol}: Price decay {profit_pct:.1%} >= threshold {decay_threshold:.0%} (avg: {avg_price:.2f}, ltp: {ltp:.2f})")
+                            print(f"[Auto-Move] {symbol}: Price decay {profit_pct:.1%} >= threshold {decay_threshold:.0%} (avg: {avg_price:.2f}, ltp: {ltp:.2f})", flush=True)
 
                             # Get target delta strike
                             strangle_data = provider.find_strangle(expiry=expiry_date, target_delta=target_delta)
@@ -1125,11 +1156,11 @@ def market_data():
                             paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
 
                             if paper_trading:
-                                print(f"[Auto-Move] PAPER: Would move {symbol} -> {new_symbol} (qty: {qty})")
+                                print(f"[Auto-Move] PAPER: Would move {symbol} -> {new_symbol} (qty: {qty})", flush=True)
                                 moved_positions.add(symbol)
                             else:
+                                # Phase 1: BUY (close old position)
                                 try:
-                                    # Square off old position (buy back)
                                     buy_order = provider.kite.place_order(
                                         variety="regular",
                                         exchange="NFO",
@@ -1139,26 +1170,44 @@ def market_data():
                                         order_type="MARKET",
                                         product="NRML"
                                     )
-                                    # Sell new position
-                                    sell_order = provider.kite.place_order(
-                                        variety="regular",
-                                        exchange="NFO",
-                                        tradingsymbol=new_symbol,
-                                        transaction_type="SELL",
-                                        quantity=qty,
-                                        order_type="MARKET",
-                                        product="NRML"
-                                    )
-                                    print(f"[Auto-Move] Moved {symbol} -> {new_symbol}: Buy #{buy_order}, Sell #{sell_order}")
+                                    print(f"[Auto-Move] BUY (close) {symbol} OK: #{buy_order}", flush=True)
+                                except Exception as buy_e:
+                                    print(f"[Auto-Move] BUY (close) {symbol} FAILED: {buy_e} — skipping move", flush=True)
+                                    continue
+
+                                time.sleep(0.3)
+
+                                # Phase 2: SELL (open new position) — retry up to 3 times
+                                sell_order = None
+                                for attempt in range(1, 4):
+                                    try:
+                                        sell_order = provider.kite.place_order(
+                                            variety="regular",
+                                            exchange="NFO",
+                                            tradingsymbol=new_symbol,
+                                            transaction_type="SELL",
+                                            quantity=qty,
+                                            order_type="MARKET",
+                                            product="NRML"
+                                        )
+                                        print(f"[Auto-Move] SELL (open) {new_symbol} OK: #{sell_order}", flush=True)
+                                        break
+                                    except Exception as sell_e:
+                                        print(f"[Auto-Move] SELL (open) {new_symbol} attempt {attempt}/3 FAILED: {sell_e}", flush=True)
+                                        if attempt < 3:
+                                            time.sleep(0.3)
+
+                                if sell_order:
+                                    print(f"[Auto-Move] Moved {symbol} -> {new_symbol}: Buy #{buy_order}, Sell #{sell_order}", flush=True)
                                     moved_positions.add(symbol)
-                                except Exception as order_e:
-                                    print(f"[Auto-Move] Order error for {symbol}: {order_e}")
+                                else:
+                                    print(f"[Auto-Move] WARNING: Closed {symbol} (Buy #{buy_order}) but failed to open {new_symbol} after 3 attempts!", flush=True)
 
                             auto_trade_state["last_move_date"] = today
                             auto_trade_state["moved_positions_today"] = moved_positions
 
             except Exception as e:
-                print(f"[Auto-Move] Error: {e}")
+                print(f"[Auto-Move] Error: {e}", flush=True)
                 import traceback
                 traceback.print_exc()
 
@@ -1691,17 +1740,12 @@ def history():
             for pos in nifty_positions:
                 symbol = pos['tradingsymbol']
 
-                # Try different expiry patterns
-                # Monthly YYMMM must be checked BEFORE weekly YYMMMDD to avoid false matches
-                match = re.match(r'NIFTY(\d{2}[A-Z]{3})(\d{5,})(CE|PE)', symbol)  # Monthly YYMMM (26JAN)
-                if not match:
-                    match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d{5,})(CE|PE)', symbol)  # Weekly YYMMMDD (26JAN27)
-                if not match:
-                    match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)  # Weekly YYMDD (26120) - [A-Z0-9] for months 1-9 and O/N/D
-                if not match:
+                # Parse symbol to get expiry, strike, option type
+                parsed = parse_nifty_symbol(symbol)
+                if not parsed:
                     continue
 
-                expiry_key = match.group(1)
+                expiry_key = parsed[0]
                 expiry_display = format_expiry_key(expiry_key)
 
                 if expiry_key not in live_expiry_data:
@@ -2025,22 +2069,11 @@ def move_position_preview():
             current_ltp = target_pos.get('last_price', 0)
 
         # Parse the symbol - try different formats
-        # Monthly YYMMM must be checked BEFORE weekly YYMMMDD to avoid false matches
-        # Format 1: NIFTY26JAN25000PE (monthly YYMMM)
-        match = re.match(r'NIFTY(\d{2}[A-Z]{3})(\d{5,})(CE|PE)', symbol)
-        # Format 2: NIFTY26JAN2725000PE (weekly YYMMMDD)
-        if not match:
-            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d{5,})(CE|PE)', symbol)
-        # Format 3: NIFTY2612025000PE (weekly compact YYMDD)
-        if not match:
-            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
-
-        if not match:
+        parsed = parse_nifty_symbol(symbol)
+        if not parsed:
             return jsonify({"success": False, "error": f"Cannot parse symbol: {symbol}"})
 
-        expiry_code = match.group(1)
-        old_strike = int(match.group(2))
-        option_type = match.group(3)
+        expiry_code, old_strike, option_type = parsed
 
         # Convert expiry code to date
         import calendar
@@ -2188,22 +2221,11 @@ def move_position():
         abs_qty = abs(qty)
 
         # Parse the symbol to get expiry and option type
-        # Monthly YYMMM must be checked BEFORE weekly YYMMMDD to avoid false matches
-        # Format 1: NIFTY26JAN25000PE (monthly YYMMM)
-        match = re.match(r'NIFTY(\d{2}[A-Z]{3})(\d{5,})(CE|PE)', symbol)
-        # Format 2: NIFTY26JAN2725000PE (weekly YYMMMDD)
-        if not match:
-            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})(\d{5,})(CE|PE)', symbol)
-        # Format 3: NIFTY2612025000PE (weekly compact YYMDD)
-        if not match:
-            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})(\d+)(CE|PE)', symbol)
-
-        if not match:
+        parsed = parse_nifty_symbol(symbol)
+        if not parsed:
             return jsonify({"success": False, "error": f"Cannot parse symbol: {symbol}"})
 
-        expiry_code = match.group(1)
-        old_strike = int(match.group(2))
-        option_type = match.group(3)
+        expiry_code, old_strike, option_type = parsed
 
         # Convert expiry code to date
         import calendar
@@ -2415,11 +2437,11 @@ def exit_expiry_positions():
                 continue
 
             # Check if this position matches the expiry
-            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})', symbol)
-            if not match:
+            parsed = parse_nifty_symbol(symbol)
+            if not parsed:
                 continue
 
-            pos_expiry = match.group(1)
+            pos_expiry = parsed[0]
             if pos_expiry != expiry_pattern:
                 continue
 
