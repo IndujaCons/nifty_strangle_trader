@@ -991,6 +991,7 @@ def market_data():
                                 print(f"[Auto-Trade]   Target: ₹{profit_target:,.0f} ({int(exit_pct * 100)}% of ₹{net_credit:,.0f} max)", flush=True)
 
                                 orders_placed = []
+                                orders_failed = []
                                 paper_trading = os.getenv("PAPER_TRADING", "false").lower() == "true"
 
                                 for pos in positions_list:
@@ -1006,23 +1007,39 @@ def market_data():
                                     if paper_trading:
                                         orders_placed.append({"symbol": symbol, "qty": exit_qty, "paper": True})
                                     else:
-                                        order_id = provider.kite.place_order(
-                                            variety="regular",
-                                            exchange="NFO",
-                                            tradingsymbol=symbol,
-                                            transaction_type=transaction_type,
-                                            quantity=exit_qty,
-                                            order_type="MARKET",
-                                            product="NRML"
-                                        )
-                                        orders_placed.append({"symbol": symbol, "order_id": order_id})
+                                        order_ok = False
+                                        for attempt in range(1, 4):
+                                            try:
+                                                order_id = provider.kite.place_order(
+                                                    variety="regular",
+                                                    exchange="NFO",
+                                                    tradingsymbol=symbol,
+                                                    transaction_type=transaction_type,
+                                                    quantity=exit_qty,
+                                                    order_type="MARKET",
+                                                    product="NRML"
+                                                )
+                                                orders_placed.append({"symbol": symbol, "order_id": order_id})
+                                                print(f"[Auto-Trade] Exit order: {transaction_type} {exit_qty} {symbol} OK: #{order_id}", flush=True)
+                                                order_ok = True
+                                                break
+                                            except Exception as order_e:
+                                                print(f"[Auto-Trade] Exit order: {transaction_type} {exit_qty} {symbol} attempt {attempt}/3 FAILED: {order_e}", flush=True)
+                                                if attempt < 3:
+                                                    time.sleep(0.3)
+                                        if not order_ok:
+                                            orders_failed.append(symbol)
+                                            print(f"[Auto-Trade] WARNING: Failed to exit {symbol} after 3 attempts!", flush=True)
 
                                 if orders_placed:
                                     auto_exit_triggered = True
-                                    exited_expiries.add(expiry_key)
+                                    if not orders_failed:
+                                        exited_expiries.add(expiry_key)
                                     auto_trade_state["last_exit_date"] = today
                                     auto_trade_state["exited_expiries_today"] = exited_expiries
-                                    print(f"[Auto-Trade] Expiry {expiry_key}: Exit complete, {len(orders_placed)} orders placed", flush=True)
+                                    print(f"[Auto-Trade] Expiry {expiry_key}: Exit {len(orders_placed)}/{len(orders_placed)+len(orders_failed)} orders placed", flush=True)
+                                    if orders_failed:
+                                        print(f"[Auto-Trade] WARNING: {len(orders_failed)} positions NOT exited: {orders_failed} — will retry next cycle", flush=True)
 
             except Exception as e:
                 print(f"[Auto-Trade] Exit check error: {e}", flush=True)
