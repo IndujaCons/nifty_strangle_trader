@@ -59,6 +59,9 @@ tracker = SignalTracker()
 last_data = {}
 auto_sync_date = None  # Track last auto-sync date
 
+# Lock for .env file writes (prevents concurrent corruption)
+env_lock = threading.Lock()
+
 # Auto-trade tracking (prevents duplicate executions)
 trade_lock = threading.Lock()
 
@@ -547,7 +550,8 @@ def index():
             access_token = session_data["access_token"]
 
             # Save to .env
-            set_key(str(ENV_FILE), "KITE_ACCESS_TOKEN", access_token)
+            with env_lock:
+                set_key(str(ENV_FILE), "KITE_ACCESS_TOKEN", access_token)
             os.environ["KITE_ACCESS_TOKEN"] = access_token
 
             # Reinitialize provider
@@ -641,7 +645,8 @@ def login_token():
         access_token = session_data["access_token"]
 
         # Save to .env
-        set_key(str(ENV_FILE), "KITE_ACCESS_TOKEN", access_token)
+        with env_lock:
+            set_key(str(ENV_FILE), "KITE_ACCESS_TOKEN", access_token)
         os.environ["KITE_ACCESS_TOKEN"] = access_token
 
         # Reinitialize provider
@@ -2513,58 +2518,59 @@ def update_settings():
     """Update settings."""
     data = request.json
 
-    if "paper_trading" in data:
-        value = "true" if data["paper_trading"] else "false"
-        set_key(str(ENV_FILE), "PAPER_TRADING", value)
-        os.environ["PAPER_TRADING"] = value
+    with env_lock:
+        if "paper_trading" in data:
+            value = "true" if data["paper_trading"] else "false"
+            set_key(str(ENV_FILE), "PAPER_TRADING", value)
+            os.environ["PAPER_TRADING"] = value
 
-    if "auto_trade" in data:
-        value = "true" if data["auto_trade"] else "false"
-        set_key(str(ENV_FILE), "AUTO_TRADE", value)
-        os.environ["AUTO_TRADE"] = value
+        if "auto_trade" in data:
+            value = "true" if data["auto_trade"] else "false"
+            set_key(str(ENV_FILE), "AUTO_TRADE", value)
+            os.environ["AUTO_TRADE"] = value
 
-    if "auto_exit" in data:
-        value = "true" if data["auto_exit"] else "false"
-        set_key(str(ENV_FILE), "AUTO_EXIT", value)
-        os.environ["AUTO_EXIT"] = value
+        if "auto_exit" in data:
+            value = "true" if data["auto_exit"] else "false"
+            set_key(str(ENV_FILE), "AUTO_EXIT", value)
+            os.environ["AUTO_EXIT"] = value
 
-    if "auto_move" in data:
-        value = "true" if data["auto_move"] else "false"
-        set_key(str(ENV_FILE), "AUTO_MOVE", value)
-        os.environ["AUTO_MOVE"] = value
+        if "auto_move" in data:
+            value = "true" if data["auto_move"] else "false"
+            set_key(str(ENV_FILE), "AUTO_MOVE", value)
+            os.environ["AUTO_MOVE"] = value
 
-    if "buy_wings" in data:
-        value = "true" if data["buy_wings"] else "false"
-        set_key(str(ENV_FILE), "BUY_WINGS", value)
-        os.environ["BUY_WINGS"] = value
+        if "buy_wings" in data:
+            value = "true" if data["buy_wings"] else "false"
+            set_key(str(ENV_FILE), "BUY_WINGS", value)
+            os.environ["BUY_WINGS"] = value
 
-    if "wing_delta" in data:
-        value = str(int(data["wing_delta"]) / 100)  # 2 → "0.02"
-        set_key(str(ENV_FILE), "WING_DELTA", value)
-        os.environ["WING_DELTA"] = value
+        if "wing_delta" in data:
+            value = str(int(data["wing_delta"]) / 100)  # 2 → "0.02"
+            set_key(str(ENV_FILE), "WING_DELTA", value)
+            os.environ["WING_DELTA"] = value
 
-    if "exit_target_pct" in data:
-        value = str(int(data["exit_target_pct"]) / 100)  # 50 → "0.50"
-        set_key(str(ENV_FILE), "EXIT_TARGET_PCT", value)
-        os.environ["EXIT_TARGET_PCT"] = value
+        if "exit_target_pct" in data:
+            value = str(int(data["exit_target_pct"]) / 100)  # 50 → "0.50"
+            set_key(str(ENV_FILE), "EXIT_TARGET_PCT", value)
+            os.environ["EXIT_TARGET_PCT"] = value
 
-    if "lot_quantity" in data:
-        value = str(int(data["lot_quantity"]))
-        set_key(str(ENV_FILE), "LOT_QUANTITY", value)
-        os.environ["LOT_QUANTITY"] = value
+        if "lot_quantity" in data:
+            value = str(int(data["lot_quantity"]))
+            set_key(str(ENV_FILE), "LOT_QUANTITY", value)
+            os.environ["LOT_QUANTITY"] = value
 
-    if "decay_threshold" in data:
-        # Convert percentage (e.g., 60) to decimal (0.60)
-        value = str(int(data["decay_threshold"]) / 100)
-        set_key(str(ENV_FILE), "MOVE_DECAY_THRESHOLD", value)
-        os.environ["MOVE_DECAY_THRESHOLD"] = value
+        if "decay_threshold" in data:
+            # Convert percentage (e.g., 60) to decimal (0.60)
+            value = str(int(data["decay_threshold"]) / 100)
+            set_key(str(ENV_FILE), "MOVE_DECAY_THRESHOLD", value)
+            os.environ["MOVE_DECAY_THRESHOLD"] = value
 
-    if "target_delta" in data:
-        # Convert percentage (e.g., 7) to decimal (0.07)
-        value = str(int(data["target_delta"]) / 100)
-        set_key(str(ENV_FILE), "TARGET_DELTA", value)
-        os.environ["TARGET_DELTA"] = value
-        print(f"[Settings] TARGET_DELTA saved: {value}")
+        if "target_delta" in data:
+            # Convert percentage (e.g., 7) to decimal (0.07)
+            value = str(int(data["target_delta"]) / 100)
+            set_key(str(ENV_FILE), "TARGET_DELTA", value)
+            os.environ["TARGET_DELTA"] = value
+            print(f"[Settings] TARGET_DELTA saved: {value}")
 
     return jsonify({"success": True})
 
