@@ -849,6 +849,10 @@ def market_data():
         if not got_trade_lock:
             print("[Trade Lock] Skipping auto-trade actions — another request is processing")
 
+        # Log when signal is ready but auto-trade won't fire (helps diagnose missed trades)
+        if signal_info.get("entry_ready") and not config.get("auto_trade"):
+            print(f"[Auto-Trade] Signal ready but AUTO_TRADE is OFF — enable it to auto-enter", flush=True)
+
         if (got_trade_lock and config.get("auto_trade") and
             signal_info.get("entry_ready") and
             not skip_signal):
@@ -2528,16 +2532,19 @@ def update_settings():
             value = "true" if data["auto_trade"] else "false"
             set_key(str(ENV_FILE), "AUTO_TRADE", value)
             os.environ["AUTO_TRADE"] = value
+            print(f"[Settings] AUTO_TRADE changed to: {value}", flush=True)
 
         if "auto_exit" in data:
             value = "true" if data["auto_exit"] else "false"
             set_key(str(ENV_FILE), "AUTO_EXIT", value)
             os.environ["AUTO_EXIT"] = value
+            print(f"[Settings] AUTO_EXIT changed to: {value}", flush=True)
 
         if "auto_move" in data:
             value = "true" if data["auto_move"] else "false"
             set_key(str(ENV_FILE), "AUTO_MOVE", value)
             os.environ["AUTO_MOVE"] = value
+            print(f"[Settings] AUTO_MOVE changed to: {value}", flush=True)
 
         if "buy_wings" in data:
             value = "true" if data["buy_wings"] else "false"
