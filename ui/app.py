@@ -718,7 +718,8 @@ def get_expiries():
             print(f"Error getting position expiries: {e}")
 
         expiries = provider.get_available_expiries(count=4, min_dte=0, position_expiries=position_expiries)
-        return jsonify({"expiries": expiries})
+        saved_expiry = os.getenv("SELECTED_EXPIRY", "")
+        return jsonify({"expiries": expiries, "selected_expiry": saved_expiry})
     except Exception as e:
         return jsonify({"expiries": [], "error": str(e)})
 
@@ -2578,6 +2579,11 @@ def update_settings():
             set_key(str(ENV_FILE), "TARGET_DELTA", value)
             os.environ["TARGET_DELTA"] = value
             print(f"[Settings] TARGET_DELTA saved: {value}")
+
+        if "selected_expiry" in data:
+            value = str(data["selected_expiry"])
+            set_key(str(ENV_FILE), "SELECTED_EXPIRY", value)
+            os.environ["SELECTED_EXPIRY"] = value
 
     return jsonify({"success": True})
 

@@ -1668,13 +1668,18 @@
                 .then(data => {
                     const selector = document.getElementById('expirySelector');
                     if (data.expiries && data.expiries.length > 0) {
-                        const saved = localStorage.getItem('selectedExpiry');
+                        // Try localStorage first, then server-side fallback
+                        const localSaved = localStorage.getItem('selectedExpiry');
+                        const serverSaved = data.selected_expiry || '';
+                        const saved = localSaved || serverSaved;
                         const validSaved = saved && data.expiries.some(e => e.expiry === saved);
                         selector.innerHTML = data.expiries.map((exp, idx) => {
                             const sel = validSaved ? exp.expiry === saved : idx === 0;
                             return `<option value="${exp.expiry}" ${sel ? 'selected' : ''}>${exp.label}</option>`;
                         }).join('');
                         selectedExpiry = validSaved ? saved : data.expiries[0].expiry;
+                        // Sync localStorage with resolved value
+                        localStorage.setItem('selectedExpiry', selectedExpiry);
                         // Refresh market data with correct expiry
                         refreshMarketData();
                     } else {
@@ -1691,6 +1696,12 @@
             const selector = document.getElementById('expirySelector');
             selectedExpiry = selector.value;
             localStorage.setItem('selectedExpiry', selectedExpiry);
+            // Persist server-side so it survives browser/device changes
+            fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected_expiry: selectedExpiry })
+            }).catch(() => {});
             console.log('[Expiry] Changed to:', selectedExpiry);
             // Reset custom strikes when expiry changes
             customStrikes = { call: null, put: null };
