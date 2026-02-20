@@ -1643,6 +1643,36 @@ def execute_trade():
             if signal_info["current_window"]:
                 tracker.record_trade(signal_info["current_window"])
 
+            # Buy protective wings if enabled
+            buy_wings = os.getenv("BUY_WINGS", "false").lower() == "true"
+            if buy_wings:
+                try:
+                    wing_delta = float(os.getenv("WING_DELTA", "0.02"))
+                    wing_data = provider.find_strangle(expiry=data.expiry, target_delta=wing_delta)
+                    if wing_data:
+                        wing_result = provider.place_wing_order(
+                            expiry=data.expiry,
+                            call_strike=wing_data.call_strike,
+                            put_strike=wing_data.put_strike,
+                            quantity=lot_quantity,
+                        )
+                        if wing_result.get("success"):
+                            result["wings"] = {
+                                "success": True,
+                                "call_strike": wing_data.call_strike,
+                                "put_strike": wing_data.put_strike,
+                            }
+                            print(f"[Manual Trade] Wings bought: {wing_data.call_strike}CE/{wing_data.put_strike}PE @ {wing_delta*100:.0f}δ", flush=True)
+                        else:
+                            result["wings"] = {"success": False, "error": wing_result.get("error")}
+                            print(f"[Manual Trade] Wing order failed: {wing_result.get('error')}", flush=True)
+                    else:
+                        result["wings"] = {"success": False, "error": f"Could not find {wing_delta*100:.0f}δ strikes"}
+                        print(f"[Manual Trade] Could not find {wing_delta*100:.0f}δ strikes for wings", flush=True)
+                except Exception as wing_e:
+                    result["wings"] = {"success": False, "error": str(wing_e)}
+                    print(f"[Manual Trade] Wing error: {wing_e}", flush=True)
+
         return jsonify(result)
 
     except Exception as e:

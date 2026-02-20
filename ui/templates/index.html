@@ -2959,11 +2959,17 @@
                 const alertDiv = document.getElementById('tradeAlert');
 
                 if (data.success) {
+                    let wingMsg = '';
+                    if (data.wings) {
+                        wingMsg = data.wings.success
+                            ? `<br>Wings: ${data.wings.call_strike}CE / ${data.wings.put_strike}PE`
+                            : `<br>Wings failed: ${data.wings.error}`;
+                    }
                     alertDiv.innerHTML = `
                         <div class="alert alert-success">
                             Trade executed successfully!<br>
                             Call Order: ${data.call_order?.order_id}<br>
-                            Put Order: ${data.put_order?.order_id}
+                            Put Order: ${data.put_order?.order_id}${wingMsg}
                         </div>
                     `;
                     // Reset custom strikes after successful trade
