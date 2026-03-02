@@ -849,11 +849,27 @@ class KiteDataProvider:
                 # Use live quote if available, else fall back to position's last_price
                 current_ltp = live_quotes.get(symbol, pos['last_price'])
 
-                # Calculate real-time P&L
+                # Calculate real-time P&L on remaining open quantity
                 if quantity < 0:  # Short position
-                    calculated_pnl = (avg_price - current_ltp) * abs(quantity)
+                    unrealised_pnl = (avg_price - current_ltp) * abs(quantity)
                 else:  # Long position
-                    calculated_pnl = (current_ltp - avg_price) * quantity
+                    unrealised_pnl = (current_ltp - avg_price) * quantity
+
+                # Detect partial close P&L (Zerodha doesn't put this in 'realised' for multi-day positions)
+                partial_close_pnl = 0
+                buy_qty = pos.get('buy_quantity', 0)
+                sell_qty = pos.get('sell_quantity', 0)
+                buy_price = pos.get('buy_price', 0)
+                sell_price = pos.get('sell_price', 0)
+                if quantity > 0 and sell_qty > 0:
+                    # Long position with partial sell: realized = (sell_price - buy_price) * sold_qty
+                    partial_close_pnl = (sell_price - buy_price) * sell_qty
+                elif quantity < 0 and buy_qty > 0:
+                    # Short position with partial buyback: realized = (sell_price - buy_price) * bought_qty
+                    partial_close_pnl = (sell_price - buy_price) * buy_qty
+
+                realised_pnl = pos.get('realised', 0) + partial_close_pnl
+                total_pnl_pos = unrealised_pnl + realised_pnl
 
                 # Calculate decay percentage for short positions
                 # Decay = how much premium has eroded from entry price
@@ -868,9 +884,9 @@ class KiteDataProvider:
                     'quantity': quantity,
                     'average_price': avg_price,
                     'ltp': current_ltp,
-                    'pnl': calculated_pnl,
-                    'unrealised': calculated_pnl,
-                    'realised': pos.get('realised', 0),
+                    'pnl': total_pnl_pos,
+                    'unrealised': unrealised_pnl,
+                    'realised': realised_pnl,
                     'decay_pct': round(decay_pct * 100, 1),  # As percentage
                 })
 

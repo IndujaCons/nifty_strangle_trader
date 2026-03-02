@@ -989,9 +989,17 @@ def market_data():
                             if qty < 0:  # Short position (sold options)
                                 net_credit += avg_price * abs(qty)  # Premium collected
                                 unrealized_pnl += (avg_price - ltp) * abs(qty)  # Profit when price drops
+                                # Partial close: some short qty bought back
+                                buy_qty = pos.get('buy_quantity', 0)
+                                if buy_qty > 0:
+                                    unrealized_pnl += (pos.get('sell_price', 0) - pos.get('buy_price', 0)) * buy_qty
                             elif qty > 0:  # Long position (bought options/wings)
                                 net_credit -= avg_price * qty  # Premium paid (reduces max profit)
                                 unrealized_pnl += (ltp - avg_price) * qty  # P&L (usually negative)
+                                # Partial close: some long qty sold
+                                sell_qty = pos.get('sell_quantity', 0)
+                                if sell_qty > 0:
+                                    unrealized_pnl += (pos.get('sell_price', 0) - pos.get('buy_price', 0)) * sell_qty
 
                         # Include realized P&L from closed/moved positions for this expiry
                         # expiry_key format: "26217" or "26FEB17", history format: "17-02-2026"
@@ -1838,7 +1846,6 @@ def history():
                     }
 
                 # Get P&L values
-                realised = pos.get('realised', 0)
                 pnl = pos.get('pnl', 0)
                 quantity = pos['quantity']
 
@@ -1854,12 +1861,23 @@ def history():
                     else:
                         calculated_pnl = (current_ltp - avg_price) * quantity
 
+                    # Detect partial close P&L (Zerodha doesn't put this in 'realised' for multi-day positions)
+                    partial_close_pnl = 0
+                    buy_qty = pos.get('buy_quantity', 0)
+                    sell_qty = pos.get('sell_quantity', 0)
+                    buy_price = pos.get('buy_price', 0)
+                    sell_price = pos.get('sell_price', 0)
+                    if quantity > 0 and sell_qty > 0:
+                        partial_close_pnl = (sell_price - buy_price) * sell_qty
+                    elif quantity < 0 and buy_qty > 0:
+                        partial_close_pnl = (sell_price - buy_price) * buy_qty
+
+                    realised = pos.get('realised', 0) + partial_close_pnl
+
                     live_expiry_data[expiry_key]['open'] += calculated_pnl
                     # Add realised profit from partial closes
                     if realised != 0:
                         live_expiry_data[expiry_key]['booked'] += realised
-                        # Also persist to CSV for next-day survival
-                        history_manager.update_from_positions([pos])
                     live_expiry_data[expiry_key]['open_positions'] += 1
                     # Max profit = sold premium - bought premium (net credit)
                     if quantity < 0:  # Sold position: add premium collected
