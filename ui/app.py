@@ -48,6 +48,18 @@ def parse_nifty_symbol(symbol):
     return None
 
 
+def validate_wing_strikes(wing_call, wing_put, sold_call, sold_put, min_gap=500):
+    """Ensure wing strikes are further OTM than sold strikes.
+
+    If wing strike overlaps or is too close, offset by min_gap points.
+    """
+    if wing_call <= sold_call:
+        wing_call = sold_call + min_gap
+    if wing_put >= sold_put:
+        wing_put = sold_put - min_gap
+    return wing_call, wing_put
+
+
 app = Flask(__name__)
 
 # Global state
@@ -892,14 +904,19 @@ def market_data():
                                 wing_delta = float(os.getenv("WING_DELTA", "0.02"))
                                 wing_data = provider.find_strangle(expiry=data.expiry, target_delta=wing_delta)
                                 if wing_data:
+                                    # Ensure wings are further OTM than sold strikes
+                                    wing_call, wing_put = validate_wing_strikes(
+                                        wing_data.call_strike, wing_data.put_strike,
+                                        data.call_strike, data.put_strike
+                                    )
                                     wing_result = provider.place_wing_order(
                                         expiry=data.expiry,
-                                        call_strike=wing_data.call_strike,
-                                        put_strike=wing_data.put_strike,
+                                        call_strike=wing_call,
+                                        put_strike=wing_put,
                                         quantity=config["lot_quantity"],
                                     )
                                     if wing_result.get("success"):
-                                        print(f"[Auto-Trade] Wings bought: {wing_data.call_strike}CE/{wing_data.put_strike}PE @ {wing_delta*100:.0f}δ", flush=True)
+                                        print(f"[Auto-Trade] Wings bought: {wing_call}CE/{wing_put}PE @ {wing_delta*100:.0f}δ", flush=True)
                                     else:
                                         print(f"[Auto-Trade] Wing order failed: {wing_result.get('error')}", flush=True)
                                 else:
@@ -1650,19 +1667,24 @@ def execute_trade():
                     wing_delta = float(os.getenv("WING_DELTA", "0.02"))
                     wing_data = provider.find_strangle(expiry=data.expiry, target_delta=wing_delta)
                     if wing_data:
+                        # Ensure wings are further OTM than sold strikes
+                        wing_call, wing_put = validate_wing_strikes(
+                            wing_data.call_strike, wing_data.put_strike,
+                            call_strike, put_strike
+                        )
                         wing_result = provider.place_wing_order(
                             expiry=data.expiry,
-                            call_strike=wing_data.call_strike,
-                            put_strike=wing_data.put_strike,
+                            call_strike=wing_call,
+                            put_strike=wing_put,
                             quantity=lot_quantity,
                         )
                         if wing_result.get("success"):
                             result["wings"] = {
                                 "success": True,
-                                "call_strike": wing_data.call_strike,
-                                "put_strike": wing_data.put_strike,
+                                "call_strike": wing_call,
+                                "put_strike": wing_put,
                             }
-                            print(f"[Manual Trade] Wings bought: {wing_data.call_strike}CE/{wing_data.put_strike}PE @ {wing_delta*100:.0f}δ", flush=True)
+                            print(f"[Manual Trade] Wings bought: {wing_call}CE/{wing_put}PE @ {wing_delta*100:.0f}δ", flush=True)
                         else:
                             result["wings"] = {"success": False, "error": wing_result.get("error")}
                             print(f"[Manual Trade] Wing order failed: {wing_result.get('error')}", flush=True)

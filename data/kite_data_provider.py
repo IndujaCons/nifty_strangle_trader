@@ -392,9 +392,12 @@ class KiteDataProvider:
         spot = self.get_spot_price()
         atm_strike = get_atm_strike(spot)
 
-        # Get strikes around ATM - wider range for longer DTE
-        # Need ~1500-2000 pts OTM to reach 5-delta strikes
-        strike_range = max(40, dte * 3)  # More strikes for longer DTE (40 for wider monthly spreads)
+        # Get strikes around ATM - wider range for longer DTE or low delta targets
+        # Need ~1500-2000 pts OTM for 5-delta, ~2500-3000 pts for 2-delta wings
+        if target_delta <= 0.03:
+            strike_range = max(60, dte * 4)  # Wider range for wing strikes (low delta)
+        else:
+            strike_range = max(40, dte * 3)  # Standard range for strangle strikes
         strikes = [atm_strike + (i * 50) for i in range(-strike_range, strike_range + 1)]
         logger.info(f"[Strike Range] ATM={atm_strike}, range={strike_range} strikes, min={atm_strike - strike_range*50}, max={atm_strike + strike_range*50}")
         quotes = self.get_option_quotes(expiry, strikes)
