@@ -1878,6 +1878,8 @@ def history():
                     # Add realised profit from partial closes
                     if realised != 0:
                         live_expiry_data[expiry_key]['booked'] += realised
+                        # Persist to CSV so it survives across days
+                        history_manager.update_from_positions([pos])
                     live_expiry_data[expiry_key]['open_positions'] += 1
                     # Max profit = sold premium - bought premium (net credit)
                     if quantity < 0:  # Sold position: add premium collected

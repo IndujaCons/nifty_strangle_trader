@@ -98,9 +98,23 @@ class TradeHistoryManager:
             quantity = pos.get('quantity', 0)
             realised = pos.get('realised', 0)
 
+            # Detect partial close P&L from buy/sell quantities
+            # (Zerodha doesn't put this in 'realised' for multi-day positions)
+            partial_close_pnl = 0
+            buy_qty = pos.get('buy_quantity', 0)
+            sell_qty = pos.get('sell_quantity', 0)
+            if quantity > 0 and sell_qty > 0:
+                partial_close_pnl = (pos.get('sell_price', 0) - pos.get('buy_price', 0)) * sell_qty
+            elif quantity < 0 and buy_qty > 0:
+                partial_close_pnl = (pos.get('sell_price', 0) - pos.get('buy_price', 0)) * buy_qty
+
+            total_realised = realised + partial_close_pnl
+
             # Handle partial closes: open position with realised profit
-            if quantity != 0 and realised != 0:
-                self._upsert_partial(pos, symbol)
+            if quantity != 0 and total_realised != 0:
+                modified_pos = dict(pos)
+                modified_pos['realised'] = total_realised
+                self._upsert_partial(modified_pos, symbol)
                 continue
 
             if quantity != 0:
