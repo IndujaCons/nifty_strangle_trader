@@ -989,17 +989,17 @@ def market_data():
                             if qty < 0:  # Short position (sold options)
                                 net_credit += avg_price * abs(qty)  # Premium collected
                                 unrealized_pnl += (avg_price - ltp) * abs(qty)  # Profit when price drops
-                                # Partial close: some short qty bought back
+                                # Partial close: some short qty bought back (use avg_price as entry, not sell_price)
                                 buy_qty = pos.get('buy_quantity', 0)
                                 if buy_qty > 0:
-                                    unrealized_pnl += (pos.get('sell_price', 0) - pos.get('buy_price', 0)) * buy_qty
+                                    unrealized_pnl += (avg_price - pos.get('buy_price', 0)) * buy_qty
                             elif qty > 0:  # Long position (bought options/wings)
                                 net_credit -= avg_price * qty  # Premium paid (reduces max profit)
                                 unrealized_pnl += (ltp - avg_price) * qty  # P&L (usually negative)
-                                # Partial close: some long qty sold
+                                # Partial close: some long qty sold (use avg_price as entry, not buy_price)
                                 sell_qty = pos.get('sell_quantity', 0)
                                 if sell_qty > 0:
-                                    unrealized_pnl += (pos.get('sell_price', 0) - pos.get('buy_price', 0)) * sell_qty
+                                    unrealized_pnl += (pos.get('sell_price', 0) - avg_price) * sell_qty
 
                         # Include realized P&L from closed/moved positions for this expiry
                         # expiry_key format: "26217" or "26FEB17", history format: "17-02-2026"
@@ -1862,15 +1862,20 @@ def history():
                         calculated_pnl = (current_ltp - avg_price) * quantity
 
                     # Detect partial close P&L (Zerodha doesn't put this in 'realised' for multi-day positions)
+                    # Use average_price as entry reference — buy_price/sell_price are 0 for carried-forward positions
                     partial_close_pnl = 0
                     buy_qty = pos.get('buy_quantity', 0)
                     sell_qty = pos.get('sell_quantity', 0)
-                    buy_price = pos.get('buy_price', 0)
                     sell_price = pos.get('sell_price', 0)
+                    buy_price_today = pos.get('buy_price', 0)
                     if quantity > 0 and sell_qty > 0:
-                        partial_close_pnl = (sell_price - buy_price) * sell_qty
+                        # Long position partially closed by selling
+                        partial_close_pnl = (sell_price - avg_price) * sell_qty
+                        print(f"[History] Partial close detected: {symbol} LONG sell_qty={sell_qty} sell_price={sell_price} avg={avg_price} pnl={partial_close_pnl}", flush=True)
                     elif quantity < 0 and buy_qty > 0:
-                        partial_close_pnl = (sell_price - buy_price) * buy_qty
+                        # Short position partially closed by buying back
+                        partial_close_pnl = (avg_price - buy_price_today) * buy_qty
+                        print(f"[History] Partial close detected: {symbol} SHORT buy_qty={buy_qty} buy_price={buy_price_today} avg={avg_price} pnl={partial_close_pnl}", flush=True)
 
                     realised = pos.get('realised', 0) + partial_close_pnl
 

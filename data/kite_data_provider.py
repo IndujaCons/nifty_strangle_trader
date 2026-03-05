@@ -856,17 +856,18 @@ class KiteDataProvider:
                     unrealised_pnl = (current_ltp - avg_price) * quantity
 
                 # Detect partial close P&L (Zerodha doesn't put this in 'realised' for multi-day positions)
+                # Use average_price as entry reference — buy_price/sell_price are 0 for carried-forward positions
                 partial_close_pnl = 0
                 buy_qty = pos.get('buy_quantity', 0)
                 sell_qty = pos.get('sell_quantity', 0)
-                buy_price = pos.get('buy_price', 0)
                 sell_price = pos.get('sell_price', 0)
+                buy_price_today = pos.get('buy_price', 0)
                 if quantity > 0 and sell_qty > 0:
-                    # Long position with partial sell: realized = (sell_price - buy_price) * sold_qty
-                    partial_close_pnl = (sell_price - buy_price) * sell_qty
+                    # Long position partially closed by selling
+                    partial_close_pnl = (sell_price - avg_price) * sell_qty
                 elif quantity < 0 and buy_qty > 0:
-                    # Short position with partial buyback: realized = (sell_price - buy_price) * bought_qty
-                    partial_close_pnl = (sell_price - buy_price) * buy_qty
+                    # Short position partially closed by buying back
+                    partial_close_pnl = (avg_price - buy_price_today) * buy_qty
 
                 realised_pnl = pos.get('realised', 0) + partial_close_pnl
                 total_pnl_pos = unrealised_pnl + realised_pnl

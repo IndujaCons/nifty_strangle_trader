@@ -100,13 +100,17 @@ class TradeHistoryManager:
 
             # Detect partial close P&L from buy/sell quantities
             # (Zerodha doesn't put this in 'realised' for multi-day positions)
+            # Use average_price as entry reference — buy_price/sell_price are 0 for carried-forward positions
             partial_close_pnl = 0
+            avg_price = pos.get('average_price', 0)
             buy_qty = pos.get('buy_quantity', 0)
             sell_qty = pos.get('sell_quantity', 0)
             if quantity > 0 and sell_qty > 0:
-                partial_close_pnl = (pos.get('sell_price', 0) - pos.get('buy_price', 0)) * sell_qty
+                # Long position partially closed by selling
+                partial_close_pnl = (pos.get('sell_price', 0) - avg_price) * sell_qty
             elif quantity < 0 and buy_qty > 0:
-                partial_close_pnl = (pos.get('sell_price', 0) - pos.get('buy_price', 0)) * buy_qty
+                # Short position partially closed by buying back
+                partial_close_pnl = (avg_price - pos.get('buy_price', 0)) * buy_qty
 
             total_realised = realised + partial_close_pnl
 
