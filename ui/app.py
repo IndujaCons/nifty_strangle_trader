@@ -938,6 +938,8 @@ def market_data():
                 # Get current positions
                 positions = provider.kite.positions()
                 net_positions = positions.get('net', [])
+                exit_day_positions = positions.get('day', [])
+                exit_day_map = {dp['tradingsymbol']: dp for dp in exit_day_positions if dp['tradingsymbol'].startswith('NIFTY')}
 
                 # Filter NIFTY options with open positions
                 nifty_positions = [p for p in net_positions
@@ -986,20 +988,30 @@ def market_data():
                             avg_price = pos.get('average_price', 0)
                             ltp = pos.get('last_price', 0)
 
+                            # Get day position for partial close detection (net may have 0 for buy/sell qty)
+                            exit_day_pos = exit_day_map.get(pos['tradingsymbol'], {})
+                            p_buy_qty = pos.get('buy_quantity', 0)
+                            p_sell_qty = pos.get('sell_quantity', 0)
+                            p_sell_price = pos.get('sell_price', 0)
+                            p_buy_price = pos.get('buy_price', 0)
+                            if p_buy_qty == 0 and p_sell_qty == 0 and exit_day_pos:
+                                p_buy_qty = exit_day_pos.get('buy_quantity', 0)
+                                p_sell_qty = exit_day_pos.get('sell_quantity', 0)
+                                p_sell_price = exit_day_pos.get('sell_price', 0)
+                                p_buy_price = exit_day_pos.get('buy_price', 0)
+
                             if qty < 0:  # Short position (sold options)
                                 net_credit += avg_price * abs(qty)  # Premium collected
                                 unrealized_pnl += (avg_price - ltp) * abs(qty)  # Profit when price drops
-                                # Partial close: some short qty bought back (use avg_price as entry, not sell_price)
-                                buy_qty = pos.get('buy_quantity', 0)
-                                if buy_qty > 0:
-                                    unrealized_pnl += (avg_price - pos.get('buy_price', 0)) * buy_qty
+                                # Partial close: some short qty bought back
+                                if p_buy_qty > 0:
+                                    unrealized_pnl += (avg_price - p_buy_price) * p_buy_qty
                             elif qty > 0:  # Long position (bought options/wings)
                                 net_credit -= avg_price * qty  # Premium paid (reduces max profit)
                                 unrealized_pnl += (ltp - avg_price) * qty  # P&L (usually negative)
-                                # Partial close: some long qty sold (use avg_price as entry, not buy_price)
-                                sell_qty = pos.get('sell_quantity', 0)
-                                if sell_qty > 0:
-                                    unrealized_pnl += (pos.get('sell_price', 0) - avg_price) * sell_qty
+                                # Partial close: some long qty sold
+                                if p_sell_qty > 0:
+                                    unrealized_pnl += (p_sell_price - avg_price) * p_sell_qty
 
                         # Include realized P&L from closed/moved positions for this expiry
                         # expiry_key format: "26217" or "26FEB17", history format: "17-02-2026"
@@ -1467,8 +1479,10 @@ def market_data():
                 history_manager = get_history_manager()
                 positions = provider.kite.positions()
                 net_positions = positions.get('net', [])
+                day_positions = positions.get('day', [])
                 nifty_positions = [p for p in net_positions if p['tradingsymbol'].startswith('NIFTY')]
-                added = history_manager.update_from_positions(nifty_positions)
+                sync_day_map = {dp['tradingsymbol']: dp for dp in day_positions if dp['tradingsymbol'].startswith('NIFTY')}
+                added = history_manager.update_from_positions(nifty_positions, day_pos_map=sync_day_map)
                 auto_sync_date = date.today()
                 if added > 0:
                     print(f"[Auto-sync] Synced {added} closed positions to history")
@@ -1803,11 +1817,21 @@ def history():
             net_positions = positions.get('net', [])
             zerodha_connected = True
 
+            day_positions = positions.get('day', [])
+
             # Filter NIFTY options
             nifty_positions = [p for p in net_positions if p['tradingsymbol'].startswith('NIFTY')]
 
+            # Build day position map for partial close detection
+            # Net positions may not have today's buy/sell quantities for carried-forward positions
+            day_pos_map = {}
+            for dp in day_positions:
+                sym = dp.get('tradingsymbol', '')
+                if sym.startswith('NIFTY'):
+                    day_pos_map[sym] = dp
+
             # Sync closed positions to CSV
-            added = history_manager.update_from_positions(nifty_positions)
+            added = history_manager.update_from_positions(nifty_positions, day_pos_map=day_pos_map)
             if added > 0:
                 print(f"Added {added} closed positions to history CSV")
 
@@ -1862,20 +1886,30 @@ def history():
                         calculated_pnl = (current_ltp - avg_price) * quantity
 
                     # Detect partial close P&L (Zerodha doesn't put this in 'realised' for multi-day positions)
-                    # Use average_price as entry reference — buy_price/sell_price are 0 for carried-forward positions
+                    # Use day positions for today's buy/sell quantities (net positions may have 0)
+                    # Use average_price from net position as entry reference
                     partial_close_pnl = 0
+                    day_pos = day_pos_map.get(symbol, {})
+                    # Try net position first, fall back to day position for buy/sell quantities
                     buy_qty = pos.get('buy_quantity', 0)
                     sell_qty = pos.get('sell_quantity', 0)
                     sell_price = pos.get('sell_price', 0)
                     buy_price_today = pos.get('buy_price', 0)
+                    # If net has no buy/sell info, use day position
+                    if buy_qty == 0 and sell_qty == 0 and day_pos:
+                        buy_qty = day_pos.get('buy_quantity', 0)
+                        sell_qty = day_pos.get('sell_quantity', 0)
+                        sell_price = day_pos.get('sell_price', 0)
+                        buy_price_today = day_pos.get('buy_price', 0)
+                    print(f"[History Debug] {symbol}: qty={quantity} avg={avg_price} buy_qty={buy_qty} sell_qty={sell_qty} sell_price={sell_price} buy_price={buy_price_today} realised={pos.get('realised', 0)} day_pos={'YES' if day_pos else 'NO'}", flush=True)
                     if quantity > 0 and sell_qty > 0:
                         # Long position partially closed by selling
                         partial_close_pnl = (sell_price - avg_price) * sell_qty
-                        print(f"[History] Partial close detected: {symbol} LONG sell_qty={sell_qty} sell_price={sell_price} avg={avg_price} pnl={partial_close_pnl}", flush=True)
+                        print(f"[History] Partial close: {symbol} LONG sell_qty={sell_qty} sell@{sell_price} avg@{avg_price} pnl={partial_close_pnl}", flush=True)
                     elif quantity < 0 and buy_qty > 0:
                         # Short position partially closed by buying back
                         partial_close_pnl = (avg_price - buy_price_today) * buy_qty
-                        print(f"[History] Partial close detected: {symbol} SHORT buy_qty={buy_qty} buy_price={buy_price_today} avg={avg_price} pnl={partial_close_pnl}", flush=True)
+                        print(f"[History] Partial close: {symbol} SHORT buy_qty={buy_qty} buy@{buy_price_today} avg@{avg_price} pnl={partial_close_pnl}", flush=True)
 
                     realised = pos.get('realised', 0) + partial_close_pnl
 
@@ -1884,7 +1918,7 @@ def history():
                     if realised != 0:
                         live_expiry_data[expiry_key]['booked'] += realised
                         # Persist to CSV so it survives across days
-                        history_manager.update_from_positions([pos])
+                        history_manager.update_from_positions([pos], day_pos_map=day_pos_map)
                     live_expiry_data[expiry_key]['open_positions'] += 1
                     # Max profit = sold premium - bought premium (net credit)
                     if quantity < 0:  # Sold position: add premium collected
@@ -1893,9 +1927,8 @@ def history():
                         live_expiry_data[expiry_key]['max_profit'] -= avg_price * quantity
                 else:
                     # Closed position - sync to CSV for persistence
-                    # Debug: log closed position detection
                     print(f"[History Sync] Closed position: {symbol}, pnl={pnl}")
-                    added = history_manager.update_from_positions([pos])
+                    added = history_manager.update_from_positions([pos], day_pos_map=day_pos_map)
                     print(f"[History Sync] CSV update result: {added} entries added")
 
     except Exception as e:
@@ -2088,9 +2121,11 @@ def sync_history():
         provider.kite.set_access_token(access_token)
         positions = provider.kite.positions()
         net_positions = positions.get('net', [])
+        day_positions = positions.get('day', [])
 
         nifty_positions = [p for p in net_positions if p['tradingsymbol'].startswith('NIFTY')]
-        added = history_manager.update_from_positions(nifty_positions)
+        sync_day_map = {dp['tradingsymbol']: dp for dp in day_positions if dp['tradingsymbol'].startswith('NIFTY')}
+        added = history_manager.update_from_positions(nifty_positions, day_pos_map=sync_day_map)
 
         return jsonify({
             "success": True,
