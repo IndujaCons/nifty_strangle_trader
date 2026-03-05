@@ -861,13 +861,13 @@ class KiteDataProvider:
                 buy_qty = pos.get('buy_quantity', 0)
                 sell_qty = pos.get('sell_quantity', 0)
                 sell_price = pos.get('sell_price', 0)
-                buy_price_today = pos.get('buy_price', 0)
+                buy_price = pos.get('buy_price', 0)
                 if quantity > 0 and sell_qty > 0:
                     # Long position partially closed by selling
                     partial_close_pnl = (sell_price - avg_price) * sell_qty
                 elif quantity < 0 and buy_qty > 0:
                     # Short position partially closed by buying back
-                    partial_close_pnl = (avg_price - buy_price_today) * buy_qty
+                    partial_close_pnl = (avg_price - buy_price) * buy_qty
 
                 realised_pnl = pos.get('realised', 0) + partial_close_pnl
                 total_pnl_pos = unrealised_pnl + realised_pnl

@@ -267,7 +267,7 @@ class TradeHistoryManager:
             pass
 
         # Remove existing partial entry for this symbol (will re-add with updated value)
-        self._remove_symbol(symbol)
+        self._remove_partial(symbol)
 
         # Parse symbol for expiry/strike/option_type
         match = re.match(r'NIFTY(\d{2}[A-Z]{3})\d{5,}(CE|PE)', symbol)
@@ -296,6 +296,22 @@ class TradeHistoryManager:
             'status': 'partial'
         }
         self.add_trade(trade_data)
+
+    def _remove_partial(self, symbol: str):
+        """Remove only partial entries for a symbol from CSV (preserves closed entries)."""
+        try:
+            rows = []
+            with open(self.csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames
+                rows = [row for row in reader if not (row.get('symbol') == symbol and row.get('status') == 'partial')]
+
+            with open(self.csv_path, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+        except Exception:
+            pass
 
     def _remove_symbol(self, symbol: str):
         """Remove all entries for a symbol from CSV."""
