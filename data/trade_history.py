@@ -104,10 +104,26 @@ class TradeHistoryManager:
             realised = pos.get('realised', 0)
 
             if trades_realized is not None:
-                # Use accurate trades-based realized P&L
-                total_realised = trades_realized.get(symbol, 0)
+                # trades_realized gives TODAY's trade P&L only.
+                # Accumulate with previous days' partial P&L to get the total.
+                today_trade_pnl = trades_realized.get(symbol, 0)
+                existing_pnl, base_pnl, partial_date = self._get_partial_info(symbol)
+                today_str = datetime.now().strftime('%Y-%m-%d')
+
+                if partial_date == today_str:
+                    # Already updated today — base is stored in entry_price field
+                    total_realised = base_pnl + today_trade_pnl
+                elif existing_pnl != 0:
+                    # First update today — existing becomes the new base
+                    base_pnl = existing_pnl
+                    total_realised = base_pnl + today_trade_pnl
+                else:
+                    # No previous partial — just today's trades
+                    base_pnl = 0
+                    total_realised = today_trade_pnl
             else:
                 # Legacy fallback: detect partial close P&L from buy/sell quantities
+                base_pnl = 0
                 partial_close_pnl = 0
                 avg_price = pos.get('average_price', 0)
                 buy_qty = pos.get('buy_quantity', 0)
@@ -131,11 +147,23 @@ class TradeHistoryManager:
             if quantity != 0 and total_realised != 0:
                 modified_pos = dict(pos)
                 modified_pos['realised'] = total_realised
+                modified_pos['_base_pnl'] = base_pnl if trades_realized is not None else 0
                 self._upsert_partial(modified_pos, symbol)
                 continue
 
             if quantity != 0:
                 continue  # Still open, no realised profit
+
+            # Position fully closed (qty=0)
+            # If we have accumulated partial P&L + today's trades, use that instead of pos.pnl
+            if trades_realized is not None and total_realised != 0:
+                # Remove partial entries, add closed entry with accumulated P&L
+                if symbol in partial_symbols:
+                    self._remove_partial(symbol)
+                    partial_symbols.discard(symbol)
+                self._add_closed_entry(symbol, total_realised, closed_symbols)
+                added += 1
+                continue
 
             # Skip if already recorded as closed TODAY (same date = same trade)
             # Allow multiple entries for same symbol on different dates (different trades)
@@ -251,12 +279,51 @@ class TradeHistoryManager:
         # Fallback: return as-is
         return expiry_key
 
+    def _get_partial_info(self, symbol: str) -> tuple:
+        """Get existing partial entry info: (pnl, base_pnl, date).
+
+        base_pnl is stored in the entry_price field — represents accumulated P&L
+        from previous days (before today's trades).
+        """
+        try:
+            with open(self.csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get('symbol') == symbol and row.get('status') == 'partial':
+                        return (
+                            float(row.get('pnl', 0)),
+                            float(row.get('entry_price', 0)),
+                            row.get('date', '')
+                        )
+        except Exception:
+            pass
+        return (0.0, 0.0, '')
+
+    def get_accumulated_realized(self) -> Dict[str, float]:
+        """Get accumulated realized P&L per symbol from partial entries."""
+        result = {}
+        try:
+            with open(self.csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    if row.get('status') == 'partial':
+                        result[row.get('symbol', '')] = float(row.get('pnl', 0))
+        except Exception:
+            pass
+        return result
+
     def _upsert_partial(self, pos: Dict, symbol: str):
-        """Insert or update a partial close entry with latest realised P&L."""
+        """Insert or update a partial close entry with latest realised P&L.
+
+        Stores base_pnl (previous days' accumulated P&L) in entry_price field
+        so it survives same-day updates and server restarts.
+        """
         import re
 
-        # Check if existing partial has same value — skip rewrite if unchanged
         new_pnl = pos.get('realised', 0)
+        base_pnl = pos.get('_base_pnl', 0)
+
+        # Check if existing partial has same value — skip rewrite if unchanged
         try:
             with open(self.csv_path, 'r') as f:
                 reader = csv.DictReader(f)
@@ -291,12 +358,50 @@ class TradeHistoryManager:
             'option_type': option_type,
             'strike': strike,
             'quantity': 0,
-            'entry_price': 0,
+            'entry_price': base_pnl,  # Store base P&L for accumulation across days
             'exit_price': 0,
-            'pnl': pos.get('realised', 0),
+            'pnl': new_pnl,
             'status': 'partial'
         }
         self.add_trade(trade_data)
+
+    def _add_closed_entry(self, symbol: str, pnl: float, closed_symbols: set):
+        """Add a closed entry with the given P&L (from accumulated partial + trades)."""
+        import re
+
+        today = datetime.now().strftime('%Y-%m-%d')
+        if symbol in closed_symbols:
+            existing_date = self._get_symbol_date(symbol)
+            if existing_date == today:
+                return  # Already have a closed entry for today
+
+        match = re.match(r'NIFTY(\d{2}[A-Z]{3})\d{5,}(CE|PE)', symbol)
+        if not match:
+            match = re.match(r'NIFTY(\d{2}[A-Z]{3}\d{2})\d{5,}(CE|PE)', symbol)
+        if not match:
+            match = re.match(r'NIFTY(\d{2}[A-Z0-9]\d{2})\d+(CE|PE)', symbol)
+        if not match:
+            return
+
+        expiry_display = self._format_expiry(match.group(1))
+        option_type = 'CE' if 'CE' in symbol else 'PE'
+        strike_match = re.search(r'(\d+)(CE|PE)', symbol)
+        strike = int(strike_match.group(1)) if strike_match else 0
+
+        trade_data = {
+            'date': today,
+            'expiry': expiry_display,
+            'symbol': symbol,
+            'option_type': option_type,
+            'strike': strike,
+            'quantity': 0,
+            'entry_price': 0,
+            'exit_price': 0,
+            'pnl': pnl,
+            'status': 'closed'
+        }
+        self.add_trade(trade_data)
+        closed_symbols.add(symbol)
 
     def _remove_partial(self, symbol: str):
         """Remove only partial entries for a symbol from CSV (preserves closed entries)."""

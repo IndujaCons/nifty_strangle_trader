@@ -1864,14 +1864,14 @@ def history():
                     else:
                         calculated_pnl = (current_ltp - avg_price) * quantity
 
-                    # Use trades-based realized P&L (accurate for carry-forward positions)
-                    realised = trades_realized.get(symbol, 0)
+                    # Use accumulated realized P&L (base from previous days + today's trades)
+                    # update_from_positions already persisted the accumulated value
+                    accumulated = history_manager.get_accumulated_realized()
+                    realised = accumulated.get(symbol, trades_realized.get(symbol, 0))
 
                     live_expiry_data[expiry_key]['open'] += calculated_pnl
                     if realised != 0:
                         live_expiry_data[expiry_key]['booked'] += realised
-                        # Persist to CSV so it survives across days
-                        history_manager.update_from_positions([pos], trades_realized=trades_realized)
                     live_expiry_data[expiry_key]['open_positions'] += 1
                     # Max profit = sold premium - bought premium (net credit)
                     if quantity < 0:  # Sold position: add premium collected
