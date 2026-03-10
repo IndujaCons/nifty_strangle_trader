@@ -1007,19 +1007,22 @@ def market_data():
                         # Total P&L = realized (closed + manual) + unrealized (open)
                         total_pnl = realized_pnl + unrealized_pnl
 
-                        if net_credit > 0:
-                            # Profit target based on NET credit (accounts for wing cost)
+                        # Max profit = open positions net credit + realized (booked + partial + manual)
+                        # Matches UI's total_max_profit formula so targets are consistent
+                        total_max_profit = net_credit + realized_pnl
+
+                        if total_max_profit > 0:
                             exit_pct = float(os.getenv("EXIT_TARGET_PCT", "0.50").strip("'\""))
-                            profit_target = net_credit * exit_pct
-                            pct_achieved = (total_pnl / net_credit * 100) if net_credit > 0 else 0
+                            profit_target = total_max_profit * exit_pct
+                            pct_achieved = (total_pnl / total_max_profit * 100) if total_max_profit > 0 else 0
 
                             # Debug: show progress toward exit target
-                            print(f"[Auto-Trade] {history_expiry_key}: {pct_achieved:.1f}% of {int(exit_pct*100)}% target (₹{total_pnl:,.0f}/₹{profit_target:,.0f})", flush=True)
+                            print(f"[Auto-Trade] {history_expiry_key}: {pct_achieved:.1f}% of {int(exit_pct*100)}% target (₹{total_pnl:,.0f}/₹{profit_target:,.0f}, max=₹{total_max_profit:,.0f})", flush=True)
 
                             if total_pnl >= profit_target:
                                 print(f"[Auto-Trade] Expiry {expiry_key}: {int(exit_pct * 100)}% target reached!", flush=True)
                                 print(f"[Auto-Trade]   Realized: ₹{realized_pnl:,.0f}, Unrealized: ₹{unrealized_pnl:,.0f}, Total: ₹{total_pnl:,.0f}", flush=True)
-                                print(f"[Auto-Trade]   Target: ₹{profit_target:,.0f} ({int(exit_pct * 100)}% of ₹{net_credit:,.0f} max)", flush=True)
+                                print(f"[Auto-Trade]   Target: ₹{profit_target:,.0f} ({int(exit_pct * 100)}% of ₹{total_max_profit:,.0f} max)", flush=True)
 
                                 orders_placed = []
                                 orders_failed = []
