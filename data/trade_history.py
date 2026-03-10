@@ -77,11 +77,12 @@ class TradeHistoryManager:
             print(f"Error adding trade: {e}")
             return False
 
-    def update_from_positions(self, positions: List[Dict], day_pos_map: Optional[Dict] = None) -> int:
+    def update_from_positions(self, positions: List[Dict], day_pos_map: Optional[Dict] = None, trades_realized: Optional[Dict] = None) -> int:
         """
         Update history from Zerodha positions.
         Adds closed positions (qty=0) that aren't already in history.
-        day_pos_map: optional {symbol: day_position} for partial close detection.
+        day_pos_map: optional {symbol: day_position} for partial close detection (legacy fallback).
+        trades_realized: optional {symbol: pnl} from kite.trades() replay — preferred source.
         Returns count of new entries added.
         """
         import re
@@ -102,29 +103,29 @@ class TradeHistoryManager:
             quantity = pos.get('quantity', 0)
             realised = pos.get('realised', 0)
 
-            # Detect partial close P&L from buy/sell quantities
-            # Net positions may have 0 for buy/sell qty on carried-forward positions — use day positions as fallback
-            partial_close_pnl = 0
-            avg_price = pos.get('average_price', 0)
-            buy_qty = pos.get('buy_quantity', 0)
-            sell_qty = pos.get('sell_quantity', 0)
-            sell_price = pos.get('sell_price', 0)
-            buy_price = pos.get('buy_price', 0)
-            # Fall back to day position for buy/sell info
-            day_pos = day_pos_map.get(symbol, {})
-            if buy_qty == 0 and sell_qty == 0 and day_pos:
-                buy_qty = day_pos.get('buy_quantity', 0)
-                sell_qty = day_pos.get('sell_quantity', 0)
-                sell_price = day_pos.get('sell_price', 0)
-                buy_price = day_pos.get('buy_price', 0)
-            if quantity > 0 and sell_qty > 0:
-                # Long position partially closed by selling
-                partial_close_pnl = (sell_price - avg_price) * sell_qty
-            elif quantity < 0 and buy_qty > 0:
-                # Short position partially closed by buying back
-                partial_close_pnl = (avg_price - buy_price) * buy_qty
+            if trades_realized is not None:
+                # Use accurate trades-based realized P&L
+                total_realised = trades_realized.get(symbol, 0)
+            else:
+                # Legacy fallback: detect partial close P&L from buy/sell quantities
+                partial_close_pnl = 0
+                avg_price = pos.get('average_price', 0)
+                buy_qty = pos.get('buy_quantity', 0)
+                sell_qty = pos.get('sell_quantity', 0)
+                sell_price = pos.get('sell_price', 0)
+                buy_price = pos.get('buy_price', 0)
+                day_pos = day_pos_map.get(symbol, {})
+                if buy_qty == 0 and sell_qty == 0 and day_pos:
+                    buy_qty = day_pos.get('buy_quantity', 0)
+                    sell_qty = day_pos.get('sell_quantity', 0)
+                    sell_price = day_pos.get('sell_price', 0)
+                    buy_price = day_pos.get('buy_price', 0)
+                if quantity > 0 and sell_qty > 0:
+                    partial_close_pnl = (sell_price - avg_price) * sell_qty
+                elif quantity < 0 and buy_qty > 0:
+                    partial_close_pnl = (avg_price - buy_price) * buy_qty
 
-            total_realised = realised + partial_close_pnl
+                total_realised = realised + partial_close_pnl
 
             # Handle partial closes: open position with realised profit
             if quantity != 0 and total_realised != 0:

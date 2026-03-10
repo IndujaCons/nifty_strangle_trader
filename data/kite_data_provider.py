@@ -841,6 +841,10 @@ class KiteDataProvider:
                 except Exception as e:
                     logger.warning(f"Failed to fetch live quotes: {e}")
 
+            # Get accurate realized P&L from trades
+            from data.realized_pnl import get_trades_realized_pnl
+            trades_realized = get_trades_realized_pnl(self.kite, net_positions)
+
             nifty_positions = []
             for pos in nifty_raw:
                 symbol = pos['tradingsymbol']
@@ -855,21 +859,8 @@ class KiteDataProvider:
                 else:  # Long position
                     unrealised_pnl = (current_ltp - avg_price) * quantity
 
-                # Detect partial close P&L (Zerodha doesn't put this in 'realised' for multi-day positions)
-                # Use average_price as entry reference — buy_price/sell_price are 0 for carried-forward positions
-                partial_close_pnl = 0
-                buy_qty = pos.get('buy_quantity', 0)
-                sell_qty = pos.get('sell_quantity', 0)
-                sell_price = pos.get('sell_price', 0)
-                buy_price = pos.get('buy_price', 0)
-                if quantity > 0 and sell_qty > 0:
-                    # Long position partially closed by selling
-                    partial_close_pnl = (sell_price - avg_price) * sell_qty
-                elif quantity < 0 and buy_qty > 0:
-                    # Short position partially closed by buying back
-                    partial_close_pnl = (avg_price - buy_price) * buy_qty
-
-                realised_pnl = pos.get('realised', 0) + partial_close_pnl
+                # Use trades-based realized P&L (accurate for carry-forward positions)
+                realised_pnl = trades_realized.get(symbol, 0)
                 total_pnl_pos = unrealised_pnl + realised_pnl
 
                 # Calculate decay percentage for short positions
